@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "Размер панели";
+"toolbarSizeHint" = "Размер кнопок панели редактора снимка, в px. Применяется со следующего снимка";
+"overlayDimmingLabel" = "Глубина маски";
+"overlayDimmingHint" = "Насколько затемнять область вне выделения. Чем больше значение, тем темнее окружение";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Снимок экрана";

@@ -123,6 +123,11 @@ enum L10n {
     static var selectionBorderRedLabel: String { s("selectionBorderRedLabel") }
     static var selectionBorderGreenLabel: String { s("selectionBorderGreenLabel") }
     static var selectionBorderBlueLabel: String { s("selectionBorderBlueLabel") }
+    static var toolbarSizeLabel: String { s("toolbarSizeLabel") }
+    static var toolbarSizeHint: String { s("toolbarSizeHint") }
+    static var overlayDimmingLabel: String { s("overlayDimmingLabel") }
+    static var overlayDimmingHint: String { s("overlayDimmingHint") }
+    static var overlayDimmingUnit: String { s("overlayDimmingUnit") }
     static var savePathTitle: String { s("savePathTitle") }
     static var savePathSubtitle: String { s("savePathSubtitle") }
     static var askSaveLocationLabel: String { s("askSaveLocationLabel") }
@@ -2436,6 +2441,56 @@ struct Defaults {
             return clampedByte(defaults.integer(forKey: "selectionBorderBlue"))
         }
         set { defaults.set(clampedByte(newValue), forKey: "selectionBorderBlue") }
+    }
+
+    /// Editor toolbar button side in points. Spacing and padding scale with it.
+    static let toolbarButtonSizeMin = 22
+    static let toolbarButtonSizeMax = 36
+    static let toolbarButtonSizeDefault = 26
+
+    static var toolbarButtonSize: Int {
+        get {
+            if defaults.object(forKey: "toolbarButtonSize") == nil {
+                return toolbarButtonSizeDefault
+            }
+            return min(
+                max(defaults.integer(forKey: "toolbarButtonSize"), toolbarButtonSizeMin),
+                toolbarButtonSizeMax
+            )
+        }
+        set {
+            defaults.set(
+                min(max(newValue, toolbarButtonSizeMin), toolbarButtonSizeMax),
+                forKey: "toolbarButtonSize"
+            )
+        }
+    }
+
+    /// Screenshot overlay mask darkness, stored as 0–90 percent of black.
+    static let overlayDimmingPercentMin = 0
+    static let overlayDimmingPercentMax = 90
+    static let overlayDimmingPercentDefault = 60
+
+    static var overlayDimmingPercent: Int {
+        get {
+            if defaults.object(forKey: "overlayDimmingPercent") == nil {
+                return overlayDimmingPercentDefault
+            }
+            return min(
+                max(defaults.integer(forKey: "overlayDimmingPercent"), overlayDimmingPercentMin),
+                overlayDimmingPercentMax
+            )
+        }
+        set {
+            defaults.set(
+                min(max(newValue, overlayDimmingPercentMin), overlayDimmingPercentMax),
+                forKey: "overlayDimmingPercent"
+            )
+        }
+    }
+
+    static var overlayDimmingAlpha: Double {
+        Double(overlayDimmingPercent) / 100
     }
 
     static var language: AppLanguage {

@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "Taille de la barre d'outils";
+"toolbarSizeHint" = "Taille des boutons de la barre d'outils d'édition. Prend effet à la capture suivante";
+"overlayDimmingLabel" = "Assombrissement du masque";
+"overlayDimmingHint" = "Intensité de l'assombrissement hors de la sélection. Plus la valeur est élevée, plus l'écran autour est sombre";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Capture d'écran";

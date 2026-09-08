@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "Toolbar Size";
+"toolbarSizeHint" = "Button size of the screenshot editor toolbar. Takes effect on the next screenshot";
+"overlayDimmingLabel" = "Overlay Dimming";
+"overlayDimmingHint" = "How dark the area outside the selection is. Higher values hide more of the surrounding screen";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Screenshot";

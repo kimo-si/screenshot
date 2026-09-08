@@ -109,6 +109,16 @@ class SettingsView: NSView {
     private var selectionBorderBlueField: NSTextField!
     private var isUpdatingSelectionBorderControls = false
 
+    // Capture chrome: toolbar size and overlay dimming
+    private var toolbarSizeSlider: NSSlider!
+    private var toolbarSizeValueLabel: NSTextField!
+    private var toolbarSizeTitleLabel: NSTextField!
+    private var toolbarSizeHintLabel: NSTextField!
+    private var overlayDimmingSlider: NSSlider!
+    private var overlayDimmingValueLabel: NSTextField!
+    private var overlayDimmingTitleLabel: NSTextField!
+    private var overlayDimmingHintLabel: NSTextField!
+
     // Beautify defaults card
     private var beautifyAutoSwitch: NSSwitch!
     private var beautifyAutoTitleLabel: NSTextField!
@@ -764,6 +774,7 @@ class SettingsView: NSView {
         togglesCard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         buildWindowShadowCard(into: stack)
+        buildCaptureChromeCard(into: stack)
 
         buildBeautifyDefaultsCard(into: stack)
 
@@ -970,6 +981,103 @@ class SettingsView: NSView {
         windowShadowSizeTitleLabel?.textColor = NSColor.white.withAlphaComponent(on ? 0.94 : 0.4)
         windowShadowSizeValueLabel?.textColor = NSColor.white.withAlphaComponent(on ? 0.88 : 0.4)
         windowShadowPreview?.isEffectEnabled = on
+    }
+
+    /// Editor toolbar size and screenshot overlay dimming.
+    private func buildCaptureChromeCard(into stack: NSStackView) {
+        let card = CardView()
+        let inner = NSStackView()
+        inner.orientation = .vertical
+        inner.alignment = .leading
+        inner.spacing = 10
+        inner.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(inner)
+        pin(inner, to: card, insets: NSEdgeInsets(top: 12, left: 14, bottom: 14, right: 14))
+
+        let toolbarHeader = NSStackView()
+        toolbarHeader.orientation = .horizontal
+        toolbarHeader.alignment = .firstBaseline
+        toolbarHeader.spacing = 8
+        toolbarHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        toolbarSizeTitleLabel = primaryLabel(L10n.toolbarSizeLabel)
+        toolbarHeader.addArrangedSubview(toolbarSizeTitleLabel)
+        toolbarHeader.addArrangedSubview(flexSpacer())
+
+        toolbarSizeValueLabel = NSTextField(
+            labelWithString: Self.toolbarButtonSizeDisplayValue(Defaults.toolbarButtonSize)
+        )
+        toolbarSizeValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        toolbarSizeValueLabel.textColor = NSColor.white.withAlphaComponent(0.88)
+        toolbarHeader.addArrangedSubview(toolbarSizeValueLabel)
+
+        inner.addArrangedSubview(toolbarHeader)
+        toolbarHeader.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let toolbarSlider = NSSlider(
+            value: Double(Defaults.toolbarButtonSize),
+            minValue: Double(Defaults.toolbarButtonSizeMin),
+            maxValue: Double(Defaults.toolbarButtonSizeMax),
+            target: self,
+            action: #selector(toolbarButtonSizeChanged(_:))
+        )
+        toolbarSlider.controlSize = .small
+        toolbarSlider.isContinuous = true
+        toolbarSlider.numberOfTickMarks = Defaults.toolbarButtonSizeMax - Defaults.toolbarButtonSizeMin + 1
+        toolbarSlider.allowsTickMarkValuesOnly = true
+        toolbarSlider.translatesAutoresizingMaskIntoConstraints = false
+        toolbarSizeSlider = toolbarSlider
+        inner.addArrangedSubview(toolbarSlider)
+        toolbarSlider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        toolbarSizeHintLabel = secondaryLabel(L10n.toolbarSizeHint, wrapping: true)
+        inner.addArrangedSubview(toolbarSizeHintLabel)
+        toolbarSizeHintLabel.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let divider = rowDivider()
+        inner.addArrangedSubview(divider)
+        divider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let dimmingHeader = NSStackView()
+        dimmingHeader.orientation = .horizontal
+        dimmingHeader.alignment = .firstBaseline
+        dimmingHeader.spacing = 8
+        dimmingHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        overlayDimmingTitleLabel = primaryLabel(L10n.overlayDimmingLabel)
+        dimmingHeader.addArrangedSubview(overlayDimmingTitleLabel)
+        dimmingHeader.addArrangedSubview(flexSpacer())
+
+        overlayDimmingValueLabel = NSTextField(
+            labelWithString: Self.overlayDimmingDisplayValue(Defaults.overlayDimmingPercent)
+        )
+        overlayDimmingValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        overlayDimmingValueLabel.textColor = NSColor.white.withAlphaComponent(0.88)
+        dimmingHeader.addArrangedSubview(overlayDimmingValueLabel)
+
+        inner.addArrangedSubview(dimmingHeader)
+        dimmingHeader.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let dimmingSlider = NSSlider(
+            value: Double(Defaults.overlayDimmingPercent),
+            minValue: Double(Defaults.overlayDimmingPercentMin),
+            maxValue: Double(Defaults.overlayDimmingPercentMax),
+            target: self,
+            action: #selector(overlayDimmingPercentChanged(_:))
+        )
+        dimmingSlider.controlSize = .small
+        dimmingSlider.isContinuous = true
+        dimmingSlider.translatesAutoresizingMaskIntoConstraints = false
+        overlayDimmingSlider = dimmingSlider
+        inner.addArrangedSubview(dimmingSlider)
+        dimmingSlider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        overlayDimmingHintLabel = secondaryLabel(L10n.overlayDimmingHint, wrapping: true)
+        inner.addArrangedSubview(overlayDimmingHintLabel)
+        overlayDimmingHintLabel.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        stack.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     /// Default beautify behaviour when the annotation editor opens: optional
@@ -3357,6 +3465,22 @@ class SettingsView: NSView {
         windowShadowPreview?.cornerRadius = CGFloat(Defaults.windowCornerRadius)
     }
 
+    @objc private func toolbarButtonSizeChanged(_ sender: NSSlider) {
+        Defaults.toolbarButtonSize = Int(sender.doubleValue.rounded())
+        sender.doubleValue = Double(Defaults.toolbarButtonSize)
+        toolbarSizeValueLabel?.stringValue = Self.toolbarButtonSizeDisplayValue(
+            Defaults.toolbarButtonSize
+        )
+    }
+
+    @objc private func overlayDimmingPercentChanged(_ sender: NSSlider) {
+        Defaults.overlayDimmingPercent = Int(sender.doubleValue.rounded())
+        sender.doubleValue = Double(Defaults.overlayDimmingPercent)
+        overlayDimmingValueLabel?.stringValue = Self.overlayDimmingDisplayValue(
+            Defaults.overlayDimmingPercent
+        )
+    }
+
     private func makeRGBChannelField(value: Int) -> NSTextField {
         let field = NSTextField()
         field.stringValue = "\(value)"
@@ -3406,6 +3530,14 @@ class SettingsView: NSView {
 
     private static func windowCornerRadiusDisplayValue(_ value: Double) -> String {
         "\(Int(value.rounded())) \(L10n.windowCornerRadiusUnit)"
+    }
+
+    private static func toolbarButtonSizeDisplayValue(_ value: Int) -> String {
+        "\(value) \(L10n.windowCornerRadiusUnit)"
+    }
+
+    private static func overlayDimmingDisplayValue(_ value: Int) -> String {
+        "\(value)\(L10n.overlayDimmingUnit)"
     }
 
     @objc private func recordingSystemAudioToggled(_ sender: NSSwitch) {
@@ -5477,6 +5609,16 @@ class SettingsView: NSView {
         selectionBorderGreenTitleLabel?.stringValue = L10n.selectionBorderGreenLabel
         selectionBorderBlueTitleLabel?.stringValue = L10n.selectionBorderBlueLabel
         refreshSelectionBorderControls()
+        toolbarSizeTitleLabel?.stringValue = L10n.toolbarSizeLabel
+        toolbarSizeHintLabel?.stringValue = L10n.toolbarSizeHint
+        toolbarSizeValueLabel?.stringValue = Self.toolbarButtonSizeDisplayValue(
+            Defaults.toolbarButtonSize
+        )
+        overlayDimmingTitleLabel?.stringValue = L10n.overlayDimmingLabel
+        overlayDimmingHintLabel?.stringValue = L10n.overlayDimmingHint
+        overlayDimmingValueLabel?.stringValue = Self.overlayDimmingDisplayValue(
+            Defaults.overlayDimmingPercent
+        )
         beautifyAutoTitleLabel?.stringValue = L10n.beautifyAutoToggleLabel
         beautifyAutoSubtitleLabel?.stringValue = L10n.beautifyAutoToggleHint
         beautifyPresetTitleLabel?.stringValue = L10n.beautifyDefaultPresetLabel

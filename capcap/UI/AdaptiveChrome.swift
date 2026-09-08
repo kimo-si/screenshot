@@ -71,6 +71,14 @@ enum AdaptiveChrome {
             : NSColor.black.withAlphaComponent(0.10)
     }
 
+    static let hoverFill = NSColor(
+        name: NSColor.Name("capcap.hoverFill")
+    ) { appearance in
+        isDark(appearance)
+            ? NSColor.white.withAlphaComponent(0.22)
+            : NSColor.black.withAlphaComponent(0.10)
+    }
+
     static let separator = NSColor(
         name: NSColor.Name("capcap.separator")
     ) { appearance in

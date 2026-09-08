@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "Kích thước thanh công cụ";
+"toolbarSizeHint" = "Kích thước nút trên thanh công cụ chỉnh sửa ảnh chụp, đơn vị px. Có hiệu lực từ lần chụp tiếp theo";
+"overlayDimmingLabel" = "Độ đậm lớp phủ";
+"overlayDimmingHint" = "Độ tối bên ngoài vùng chọn. Giá trị càng lớn, xung quanh càng tối";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Chụp màn hình";

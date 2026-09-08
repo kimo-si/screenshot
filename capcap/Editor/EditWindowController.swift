@@ -17,7 +17,7 @@ enum EditorToolbarPlacement {
         let margin = edgeMargin
         let minimumX = bounds.minX + margin
         let maximumX = bounds.maxX - width - margin
-        let x = max(minimumX, min(maximumX, referenceRect.maxX - width))
+        let x = max(minimumX, min(maximumX, referenceRect.midX - width / 2))
 
         let minimumY = bounds.minY + margin
         let maximumY = bounds.maxY - max(0, topSafeInset) - height - margin
@@ -2954,12 +2954,18 @@ class ToolbarView: FrostedHUDView {
 
     /// Button run geometry. `preferredSize` derives the capsule size from
     /// these so the dark background always wraps the buttons exactly.
-    static let buttonSize: CGFloat = 32
-    static let buttonSpacing: CGFloat = 6
+    /// Values follow Settings → toolbar size (22–36 px, default 26).
+    static var buttonSize: CGFloat { CGFloat(Defaults.toolbarButtonSize) }
+    static var buttonSpacing: CGFloat { scaledToolbarMetric(4, minimum: 3) }
     /// Inset along the main axis at both ends of the run.
-    static let endPadding: CGFloat = 15
-    /// Inset on the cross axis — keeps a 44pt-thick capsule around 32pt buttons.
-    static let crossPadding: CGFloat = 6
+    static var endPadding: CGFloat { scaledToolbarMetric(10, minimum: 8) }
+    /// Inset on the cross axis — keeps a compact capsule around the buttons.
+    static var crossPadding: CGFloat { scaledToolbarMetric(4, minimum: 3) }
+    static var symbolPointSize: CGFloat { scaledToolbarMetric(12, minimum: 10) }
+
+    private static func scaledToolbarMetric(_ reference: CGFloat, minimum: CGFloat) -> CGFloat {
+        max(minimum, (buttonSize * reference / CGFloat(Defaults.toolbarButtonSizeDefault)).rounded())
+    }
 
     let orientation: Orientation
     private let items: [ToolbarItemID]
@@ -3108,6 +3114,14 @@ class ToolButton: NSButton {
     /// Text shown by the dark hover tooltip. nil = no tip.
     var hoverTip: String?
 
+    private(set) var isHovered = false {
+        didSet {
+            if oldValue != isHovered {
+                needsDisplay = true
+            }
+        }
+    }
+
     private let normalColor: NSColor
     private let selectedColor: NSColor
     private var hoverTrackingArea: NSTrackingArea?
@@ -3122,7 +3136,7 @@ class ToolButton: NSButton {
         setButtonType(.momentaryPushIn)
 
         if let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            let config = NSImage.SymbolConfiguration(pointSize: ToolbarView.symbolPointSize, weight: .medium)
             image = img.withSymbolConfiguration(config)
         }
 
@@ -3153,6 +3167,7 @@ class ToolButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        isHovered = true
         guard let tip = hoverTip, let window else { return }
         let frameInWindow = convert(bounds, to: nil)
         let frameOnScreen = window.convertToScreen(frameInWindow)
@@ -3161,6 +3176,7 @@ class ToolButton: NSButton {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        isHovered = false
         ToolTipWindow.hide()
     }
 
@@ -3171,14 +3187,23 @@ class ToolButton: NSButton {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { ToolTipWindow.hide() }
+        if window == nil {
+            isHovered = false
+            ToolTipWindow.hide()
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isSelected {
-            contentTintColor = selectedColor
-            let bgPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 6, yRadius: 6)
-            AdaptiveChrome.selectedFill.setFill()
+        let showSelectedChrome = isSelected
+        let showHoverChrome = !isSelected && (isHovered || isHighlighted)
+        if showSelectedChrome || showHoverChrome {
+            contentTintColor = showSelectedChrome ? selectedColor : normalColor
+            let bgPath = NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5),
+                xRadius: 6,
+                yRadius: 6
+            )
+            (showSelectedChrome ? AdaptiveChrome.selectedFill : AdaptiveChrome.hoverFill).setFill()
             bgPath.fill()
         } else {
             contentTintColor = normalColor
@@ -3203,6 +3228,13 @@ final class MoveSelectionDragHandle: NSView {
     private var pressStartLocation: NSPoint?
     private var isPressed: Bool = false {
         didSet { needsDisplay = true }
+    }
+    private var isHovered = false {
+        didSet {
+            if oldValue != isHovered {
+                needsDisplay = true
+            }
+        }
     }
     private var hoverTrackingArea: NSTrackingArea?
 
@@ -3240,6 +3272,7 @@ final class MoveSelectionDragHandle: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        isHovered = true
         guard let tip = hoverTip, let window else { return }
         let frameInWindow = convert(bounds, to: nil)
         let frameOnScreen = window.convertToScreen(frameInWindow)
@@ -3248,12 +3281,16 @@ final class MoveSelectionDragHandle: NSView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        isHovered = false
         ToolTipWindow.hide()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { ToolTipWindow.hide() }
+        if window == nil {
+            isHovered = false
+            ToolTipWindow.hide()
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -3281,14 +3318,18 @@ final class MoveSelectionDragHandle: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isPressed {
-            let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 6, yRadius: 6)
-            AdaptiveChrome.selectedFill.setFill()
+        if isPressed || isHovered {
+            let bg = NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5),
+                xRadius: 6,
+                yRadius: 6
+            )
+            (isPressed ? AdaptiveChrome.selectedFill : AdaptiveChrome.hoverFill).setFill()
             bg.fill()
         }
 
         let symbolName = "arrow.up.and.down.and.arrow.left.and.right"
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: ToolbarView.symbolPointSize, weight: .medium)
         guard let img = NSImage(
             systemSymbolName: symbolName,
             accessibilityDescription: "Move selection"
@@ -4589,6 +4630,14 @@ private final class ArrowStyleButtonView: NSView {
     var isSelected: Bool {
         didSet { needsDisplay = true }
     }
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovering = false {
+        didSet {
+            if oldValue != isHovering {
+                needsDisplay = true
+            }
+        }
+    }
 
     init(frame: NSRect, style: ArrowStyle, isSelected: Bool) {
         self.style = style
@@ -4602,10 +4651,41 @@ private final class ArrowStyleButtonView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let color = isSelected ? accentGreen : NSColor.secondaryLabelColor
         color.setFill()
         color.setStroke()
+
+        if isSelected || isHovering {
+            let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+            (isSelected ? AdaptiveChrome.selectedFill : AdaptiveChrome.hoverFill).setFill()
+            bg.fill()
+            color.setFill()
+            color.setStroke()
+        }
 
         let start = NSPoint(x: bounds.minX + 3, y: bounds.midY)
         let end = NSPoint(x: bounds.maxX - 3, y: bounds.midY)
@@ -4704,6 +4784,13 @@ private class ColorSwatchView: NSView {
     }
     var itemIndex: Int = 0
     private var hoverTrackingArea: NSTrackingArea?
+    private var isHovering = false {
+        didSet {
+            if oldValue != isHovering {
+                needsDisplay = true
+            }
+        }
+    }
 
     init(frame: NSRect, color: NSColor, isSelected: Bool, style: Style = .paletteDot) {
         self.color = color
@@ -4735,6 +4822,7 @@ private class ColorSwatchView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        isHovering = true
         guard let tip = hoverTip, let window else { return }
         let frameInWindow = convert(bounds, to: nil)
         let frameOnScreen = window.convertToScreen(frameInWindow)
@@ -4743,6 +4831,7 @@ private class ColorSwatchView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        isHovering = false
         ToolTipWindow.hide()
     }
 
@@ -4773,6 +4862,11 @@ private class ColorSwatchView: NSView {
             let ring = NSBezierPath(ovalIn: bounds)
             accentGreen.setStroke()
             ring.lineWidth = 2
+            ring.stroke()
+        } else if isHovering {
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+            NSColor.white.withAlphaComponent(0.55).setStroke()
+            ring.lineWidth = 1.5
             ring.stroke()
         }
 
@@ -5286,6 +5380,14 @@ private final class ShapeStrokeStyleButtonView: NSView {
     var isSelected: Bool {
         didSet { needsDisplay = true }
     }
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovering = false {
+        didSet {
+            if oldValue != isHovering {
+                needsDisplay = true
+            }
+        }
+    }
 
     init(frame: NSRect, style: ShapeStrokeStyle, previewShape: ShapeStrokePreviewShape, isSelected: Bool) {
         self.style = style
@@ -5308,12 +5410,39 @@ private final class ShapeStrokeStyleButtonView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let color = isSelected ? accentGreen : NSColor.secondaryLabelColor
 
-        if isSelected {
+        if isSelected || isHovering {
             let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 7, yRadius: 7)
-            accentGreen.withAlphaComponent(0.12).setFill()
+            if isSelected {
+                accentGreen.withAlphaComponent(0.12).setFill()
+            } else {
+                AdaptiveChrome.hoverFill.setFill()
+            }
             bg.fill()
         }
 
@@ -5833,6 +5962,14 @@ private class BeautifySwatchView: NSView {
     var wallpaperThumbnail: NSImage? {
         didSet { needsDisplay = true }
     }
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovering = false {
+        didSet {
+            if oldValue != isHovering {
+                needsDisplay = true
+            }
+        }
+    }
 
     init(frame: NSRect, preset: BeautifyPreset, isSelected: Bool) {
         self.preset = preset
@@ -5851,6 +5988,29 @@ private class BeautifySwatchView: NSView {
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -5890,6 +6050,11 @@ private class BeautifySwatchView: NSView {
             let ring = NSBezierPath(ovalIn: bounds)
             accentGreen.setStroke()
             ring.lineWidth = 2
+            ring.stroke()
+        } else if isHovering {
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+            NSColor.white.withAlphaComponent(0.55).setStroke()
+            ring.lineWidth = 1.5
             ring.stroke()
         }
     }

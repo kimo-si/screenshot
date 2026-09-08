@@ -16,10 +16,10 @@ final class EditorToolbarPlacementTests: XCTestCase {
         )
 
         XCTAssertEqual(rect.maxY, bounds.maxY - 38 - 8, accuracy: 0.001)
-        XCTAssertEqual(rect.maxX, bounds.maxX - 8, accuracy: 0.001)
+        XCTAssertEqual(rect.midX, bounds.midX, accuracy: 0.001)
     }
 
-    func testPrimaryToolbarRightAlignsWithSelection() {
+    func testPrimaryToolbarCentersWithSelection() {
         let selection = NSRect(x: 200, y: 300, width: 900, height: 500)
         let rect = EditorToolbarPlacement.primaryToolbarRect(
             referenceRect: selection,
@@ -28,7 +28,19 @@ final class EditorToolbarPlacementTests: XCTestCase {
             topSafeInset: 38
         )
 
-        XCTAssertEqual(rect.maxX, selection.maxX, accuracy: 0.001)
+        XCTAssertEqual(rect.midX, selection.midX, accuracy: 0.001)
+    }
+
+    func testPrimaryToolbarClampsCenteredPositionToScreenMargin() {
+        let selection = NSRect(x: 20, y: 300, width: 80, height: 200)
+        let rect = EditorToolbarPlacement.primaryToolbarRect(
+            referenceRect: selection,
+            in: bounds,
+            size: toolbarSize,
+            topSafeInset: 38
+        )
+
+        XCTAssertEqual(rect.minX, bounds.minX + 8, accuracy: 0.001)
     }
 
     func testPrimaryToolbarKeepsEdgeMarginWithoutTopSafeInset() {

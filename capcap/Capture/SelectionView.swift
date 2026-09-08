@@ -163,7 +163,9 @@ class SelectionView: NSView {
     private let handleSize: CGFloat = 8
     private let handleHitSize: CGFloat = 12
     private let borderWidth: CGFloat = 2.0
-    private let dimmingOverlayAlpha: CGFloat = 0.60
+    private var dimmingOverlayAlpha: CGFloat {
+        CGFloat(Defaults.overlayDimmingAlpha)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -693,6 +695,7 @@ class SelectionView: NSView {
         overlayCanvas.frame = bounds
         dimmingLayer.frame = overlayCanvas.bounds
         borderLayer.frame = overlayCanvas.bounds
+        dimmingLayer.fillColor = NSColor.black.withAlphaComponent(dimmingOverlayAlpha).cgColor
 
         let cutout: NSRect?
         var borderRect: NSRect?

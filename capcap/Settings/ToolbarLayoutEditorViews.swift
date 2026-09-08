@@ -663,7 +663,7 @@ final class ToolbarLayoutPreviewView: NSView {
         let run = capsuleRun(layout.primary.count)
         let maxWidth = max(capsuleThickness, bounds.width - previewMargin * 2)
         let width = min(run, maxWidth)
-        let proposedX = selection.maxX - width
+        let proposedX = selection.midX - width / 2
         let x = max(previewMargin, min(bounds.maxX - previewMargin - width, proposedX))
         primaryScrollView.frame = NSRect(
             x: x,

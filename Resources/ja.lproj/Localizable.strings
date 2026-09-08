@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "ツールバーのサイズ";
+"toolbarSizeHint" = "スクリーンショット編集ツールバーのボタンサイズ（px）。次の撮影から適用されます";
+"overlayDimmingLabel" = "マスクの濃さ";
+"overlayDimmingHint" = "選択範囲の外側をどれだけ暗くするか。値を大きくすると周囲がより暗くなります";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "スクリーンショット";

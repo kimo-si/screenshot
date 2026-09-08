@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "도구 모음 크기";
+"toolbarSizeHint" = "스크린샷 편집 도구 모음 버튼 크기(px). 다음 캡처부터 적용됩니다";
+"overlayDimmingLabel" = "마스크 농도";
+"overlayDimmingHint" = "선택 영역 밖을 얼마나 어둡게 할지 정합니다. 값이 클수록 주변이 더 어두워집니다";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "스크린샷";

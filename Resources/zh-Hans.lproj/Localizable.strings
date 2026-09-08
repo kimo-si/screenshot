@@ -41,6 +41,11 @@
 "selectionBorderRedLabel" = "R";
 "selectionBorderGreenLabel" = "G";
 "selectionBorderBlueLabel" = "B";
+"toolbarSizeLabel" = "工具栏大小";
+"toolbarSizeHint" = "截图编辑工具栏按钮尺寸，单位 px。下次截图时生效";
+"overlayDimmingLabel" = "遮罩深度";
+"overlayDimmingHint" = "截图时选区外的暗角深度。数值越大，周围越暗";
+"overlayDimmingUnit" = "%";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "截图";

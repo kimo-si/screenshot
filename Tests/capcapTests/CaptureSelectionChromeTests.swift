@@ -10,14 +10,17 @@ final class CaptureSelectionChromeTests: XCTestCase {
         "selectionBorderGreen",
         "selectionBorderBlue"
     ]
+    private let dimmingKey = "overlayDimmingPercent"
 
     override func setUp() {
         super.setUp()
         borderKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        UserDefaults.standard.removeObject(forKey: dimmingKey)
     }
 
     override func tearDown() {
         borderKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        UserDefaults.standard.removeObject(forKey: dimmingKey)
         super.tearDown()
     }
 
@@ -153,6 +156,22 @@ final class CaptureSelectionChromeTests: XCTestCase {
         XCTAssertEqual(view.currentSelectionRect, NSRect(x: 50, y: 50, width: 200, height: 150))
         let selectedMask = try XCTUnwrap(dimmingShapeLayer(in: view)?.path)
         XCTAssertFalse(selectedMask.contains(CGPoint(x: 100, y: 100), using: .evenOdd))
+    }
+
+    func testOverlayDimmingPercentDefaultsAndClamps() {
+        XCTAssertEqual(Defaults.overlayDimmingPercent, Defaults.overlayDimmingPercentDefault)
+        Defaults.overlayDimmingPercent = -8
+        XCTAssertEqual(Defaults.overlayDimmingPercent, Defaults.overlayDimmingPercentMin)
+        Defaults.overlayDimmingPercent = 200
+        XCTAssertEqual(Defaults.overlayDimmingPercent, Defaults.overlayDimmingPercentMax)
+    }
+
+    func testSelectionViewUsesConfiguredDimmingAlpha() throws {
+        Defaults.overlayDimmingPercent = 40
+        let view = SelectionView(frame: NSRect(x: 0, y: 0, width: 200, height: 160))
+        view.layout()
+        let dimming = try XCTUnwrap(dimmingShapeLayer(in: view))
+        XCTAssertEqual(dimming.fillColor?.alpha ?? 0, 0.40, accuracy: 0.02)
     }
 
     // 创建固定窗口检测快照，不依赖桌面上真实应用的窗口布局
