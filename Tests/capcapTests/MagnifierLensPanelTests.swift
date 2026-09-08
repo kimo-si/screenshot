@@ -4,6 +4,84 @@ import AppKit
 
 final class MagnifierLensPanelTests: XCTestCase {
 
+    // 从实际渲染图验证每个象限四格，中心分隔线为青色且格内没有额外白线
+    func testLensGridHasEightRowsAndColumnsWithCentralCyanDividers() throws {
+        let bitmap = try renderLensPreview()
+        let scale = CGFloat(bitmap.pixelsWide) / 179
+        for division in 1..<8 {
+            let position = 1.5 + CGFloat(division) * 22
+            let vertical = try previewColor(bitmap, x: position, y: 12.5, scale: scale)
+            let horizontal = try previewColor(bitmap, x: 12.5, y: position, scale: scale)
+            for color in [vertical, horizontal] {
+                XCTAssertGreaterThan(color.greenComponent, 0.45)
+                XCTAssertGreaterThan(color.blueComponent, 0.45)
+                if division == 4 {
+                    XCTAssertLessThan(color.redComponent, 0.15)
+                } else {
+                    XCTAssertGreaterThan(color.redComponent, 0.45)
+                }
+            }
+        }
+        // 扫描两条穿过格子内部的线，防止旧版九等分网格叠加残留
+        for coordinate in 3..<176 where (4...20).contains(coordinate % 22) {
+            XCTAssertLessThan(try previewColor(bitmap, x: CGFloat(coordinate), y: 12.5, scale: scale).redComponent, 0.2)
+            XCTAssertLessThan(try previewColor(bitmap, x: 12.5, y: CGFloat(coordinate), scale: scale).redComponent, 0.2)
+        }
+    }
+
+    // 按视图坐标读取位图颜色，兼容普通与 Retina 缩放比例
+    private func previewColor(_ bitmap: NSBitmapImageRep, x: CGFloat, y: CGFloat,
+                              scale: CGFloat) throws -> NSColor {
+        try XCTUnwrap(bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB))
+    }
+
+    // 验证浅色系统外观下仍使用深色面板，中心色块不被十字线覆盖
+    func testLensKeepsDarkBackgroundAndUnobscuredSample() throws {
+        let bitmap = try renderLensPreview()
+        let image = try XCTUnwrap(bitmap.cgImage)
+        let scale = CGFloat(bitmap.pixelsWide) / 179
+        let center = try XCTUnwrap(MagnifierLensPanelSampler.sample(
+            image: image, at: CGPoint(x: 89.5 * scale, y: 89.5 * scale)
+        ))
+        // AppKit 的色彩空间转换可能产生一个色阶的舍入误差
+        XCTAssertEqual(Double(center.r), 10, accuracy: 1)
+        XCTAssertEqual(Double(center.g), 14, accuracy: 1)
+        XCTAssertEqual(Double(center.b), 20, accuracy: 1)
+        let background = try XCTUnwrap(bitmap.colorAt(
+            x: Int(5 * scale), y: Int(205 * scale)
+        )?.usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(background.redComponent, 0.14)
+        XCTAssertLessThan(background.redComponent, 0.25)
+        XCTAssertLessThan(background.greenComponent, 0.25)
+        XCTAssertLessThan(background.blueComponent, 0.25)
+        XCTAssertGreaterThan(background.alphaComponent, 0.9)
+        if let path = ProcessInfo.processInfo.environment["CAPCAP_LENS_PREVIEW_PATH"] {
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            try png.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    // 使用真实 AppKit 绘制路径生成与截图面板相同的位图
+    private func renderLensPreview() throws -> NSBitmapImageRep {
+        _ = NSApplication.shared
+        let size = NSSize(width: 179, height: 291)
+        let view = MagnifierLensPanelView(frame: NSRect(origin: .zero, size: size))
+        view.appearance = NSAppearance(named: .aqua)
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 128,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(NSColor(srgbRed: 10.0 / 255, green: 14.0 / 255,
+                                    blue: 20.0 / 255, alpha: 1).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        view.update(sample: .init(r: 10, g: 14, b: 20), pixelPoint: CGPoint(x: 16, y: 16),
+                    mouseLocation: CGPoint(x: 2434, y: 1635), snapshot: try XCTUnwrap(context.makeImage()),
+                    screenFrame: NSRect(x: 0, y: 0, width: 32, height: 32), format: .hex)
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        return bitmap
+    }
+
     func testPixelCoordinateMapsGlobalToImageSpace() {
         // Screen occupies (0, 0) → (1440, 900) in points. Snapshot is 2880×1800
         // (2x scale). Cursor is at the screen center (720, 450).
@@ -228,10 +306,10 @@ final class MagnifierLensPanelTests: XCTestCase {
     }
 
     func testHintLabelsIncludeTheirShortcuts() {
-        XCTAssertTrue(L10n.magnifierLensPanelAspectHint.contains("R"))
-        XCTAssertTrue(L10n.magnifierLensPanelFormatHint.contains("F"))
-        XCTAssertFalse(L10n.magnifierLensPanelFormatHint.contains("Shift"))
         XCTAssertTrue(L10n.magnifierLensPanelCopyHint.contains("C"))
+        XCTAssertTrue(L10n.magnifierLensPanelHistoryHint.contains("H"))
+        XCTAssertFalse(L10n.magnifierLensPanelCopyHint.isEmpty)
+        XCTAssertFalse(L10n.magnifierLensPanelHistoryHint.isEmpty)
         XCTAssertFalse(L10n.magnifierLensPanelAspectFree.isEmpty)
     }
 
@@ -268,13 +346,13 @@ final class MagnifierLensPanelTests: XCTestCase {
         Defaults.magnifierLensPanelMagnifiedSize = 192
         XCTAssertEqual(Defaults.magnifierLensPanelMagnifiedSize, 192)
         UserDefaults.standard.removeObject(forKey: "magnifierLensPanelMagnification")
-        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 4.0, accuracy: 0.001)
+        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 22.0, accuracy: 0.001)
         Defaults.magnifierLensPanelMagnification = .infinity
-        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 4.0, accuracy: 0.001)
+        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 22.0, accuracy: 0.001)
         Defaults.magnifierLensPanelMagnification = 0.25
         XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 1.0, accuracy: 0.001)
         Defaults.magnifierLensPanelMagnification = 40
-        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 16.0, accuracy: 0.001)
+        XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 32.0, accuracy: 0.001)
         Defaults.magnifierLensPanelMagnification = 8
         XCTAssertEqual(Defaults.magnifierLensPanelMagnification, 8.0, accuracy: 0.001)
         // Offsets default to (15, 15).

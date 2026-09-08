@@ -30,9 +30,17 @@
 "countdownHint" = "按住 ⌥ Option 后双击 ⌘ 或按截图快捷键，先弹出倒计时再截图，按 Esc 取消";
 "countdownSecondsSuffix" = "秒";
 "windowShadowToggleLabel" = "窗口截图阴影";
-"windowShadowToggleHint" = "点选窗口截图时自动裁出圆角，并加上 macOS 风格的投影";
+"windowShadowToggleHint" = "点选窗口截图时加上 macOS 风格的投影";
 "windowShadowSizeLabel" = "阴影大小";
 "windowShadowSizeHint" = "数值越大投影越柔和、扩散越远，窗口看起来悬浮得越高";
+"windowCornerRadiusLabel" = "圆角";
+"windowCornerRadiusHint" = "窗口截图和框选四个角的圆角半径，单位 px。导出图片同步裁切。0 为直角";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "选区边框颜色";
+"selectionBorderColorHint" = "截图框选时虚线边框的颜色，可填 RGB（0–255）";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "截图";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX: %@";
 "magnifierLensPanelRgb" = "RGB: %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "复制颜色(C)";
+"magnifierLensPanelCopyHint" = "按 C 复制色值";
 "magnifierLensPanelFormatHint" = "色值格式(F)";
+"magnifierLensPanelHistoryHint" = "按 H 进入标注库";
 "magnifierLensPanelAspectFree" = "自由";
 "magnifierLensPanelAspectHint" = "截图比例(R)";
 /* 文件上传 */

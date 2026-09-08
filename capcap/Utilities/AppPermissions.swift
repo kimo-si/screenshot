@@ -6,6 +6,18 @@ enum AppPermissions {
         accessibilityGranted && screenRecordingGranted
     }
 
+    /// Explicit local-debug hatch. Lets the app finish launching when TCC
+    /// still reports unauthorized (common with ad-hoc signed rebuilds).
+    /// Screen capture itself still requires a real Screen Recording grant.
+    static var skipPermissionGate: Bool {
+        ProcessInfo.processInfo.arguments.contains("--skip-permission-gate")
+            || ProcessInfo.processInfo.environment["CAPCAP_SKIP_PERMISSION_GATE"] == "1"
+    }
+
+    static var canLaunchApp: Bool {
+        allRequiredGranted || skipPermissionGate
+    }
+
     static var accessibilityGranted: Bool {
         AXIsProcessTrusted()
     }

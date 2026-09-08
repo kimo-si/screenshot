@@ -94,6 +94,20 @@ class SettingsView: NSView {
     private var windowShadowSubtitleLabel: NSTextField?
     private var windowShadowSizeTitleLabel: NSTextField!
     private var windowShadowSizeHintLabel: NSTextField!
+    private var windowCornerRadiusSlider: NSSlider!
+    private var windowCornerRadiusValueLabel: NSTextField!
+    private var windowCornerRadiusTitleLabel: NSTextField!
+    private var windowCornerRadiusHintLabel: NSTextField!
+    private var selectionBorderColorWell: NSColorWell!
+    private var selectionBorderTitleLabel: NSTextField!
+    private var selectionBorderHintLabel: NSTextField!
+    private var selectionBorderRedTitleLabel: NSTextField!
+    private var selectionBorderGreenTitleLabel: NSTextField!
+    private var selectionBorderBlueTitleLabel: NSTextField!
+    private var selectionBorderRedField: NSTextField!
+    private var selectionBorderGreenField: NSTextField!
+    private var selectionBorderBlueField: NSTextField!
+    private var isUpdatingSelectionBorderControls = false
 
     // Beautify defaults card
     private var beautifyAutoSwitch: NSSwitch!
@@ -767,8 +781,8 @@ class SettingsView: NSView {
         return wrapPane(stack)
     }
 
-    /// Window-capture shadow card: a toggle for the rounded-corner + drop
-    /// shadow effect, a size slider, and a live preview of the result.
+    /// Window-capture shadow card: corner radius (window + region), selection
+    /// border color, optional drop shadow, and a live preview.
     private func buildWindowShadowCard(into stack: NSStackView) {
         let card = CardView()
         let inner = NSStackView()
@@ -791,6 +805,105 @@ class SettingsView: NSView {
         windowShadowSwitch = toggle.toggle
         inner.addArrangedSubview(toggle.row)
         toggle.row.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let cornerDivider = rowDivider()
+        inner.addArrangedSubview(cornerDivider)
+        cornerDivider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let cornerHeader = NSStackView()
+        cornerHeader.orientation = .horizontal
+        cornerHeader.alignment = .firstBaseline
+        cornerHeader.spacing = 8
+        cornerHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        windowCornerRadiusTitleLabel = primaryLabel(L10n.windowCornerRadiusLabel)
+        cornerHeader.addArrangedSubview(windowCornerRadiusTitleLabel)
+        cornerHeader.addArrangedSubview(flexSpacer())
+
+        windowCornerRadiusValueLabel = NSTextField(
+            labelWithString: Self.windowCornerRadiusDisplayValue(Defaults.windowCornerRadius)
+        )
+        windowCornerRadiusValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        windowCornerRadiusValueLabel.textColor = NSColor.white.withAlphaComponent(0.88)
+        cornerHeader.addArrangedSubview(windowCornerRadiusValueLabel)
+
+        inner.addArrangedSubview(cornerHeader)
+        cornerHeader.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let cornerSlider = NSSlider(
+            value: Defaults.windowCornerRadius,
+            minValue: Defaults.windowCornerRadiusMin,
+            maxValue: Defaults.windowCornerRadiusMax,
+            target: self,
+            action: #selector(windowCornerRadiusChanged(_:))
+        )
+        cornerSlider.controlSize = .small
+        cornerSlider.isContinuous = true
+        cornerSlider.translatesAutoresizingMaskIntoConstraints = false
+        windowCornerRadiusSlider = cornerSlider
+        inner.addArrangedSubview(cornerSlider)
+        cornerSlider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        windowCornerRadiusHintLabel = secondaryLabel(L10n.windowCornerRadiusHint, wrapping: true)
+        inner.addArrangedSubview(windowCornerRadiusHintLabel)
+        windowCornerRadiusHintLabel.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let borderDivider = rowDivider()
+        inner.addArrangedSubview(borderDivider)
+        borderDivider.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let borderHeader = NSStackView()
+        borderHeader.orientation = .horizontal
+        borderHeader.alignment = .centerY
+        borderHeader.spacing = 8
+        borderHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        selectionBorderTitleLabel = primaryLabel(L10n.selectionBorderColorLabel)
+        borderHeader.addArrangedSubview(selectionBorderTitleLabel)
+        borderHeader.addArrangedSubview(flexSpacer())
+
+        let colorWell = NSColorWell()
+        colorWell.color = CaptureSelectionChrome.borderColor
+        colorWell.target = self
+        colorWell.action = #selector(selectionBorderColorChanged(_:))
+        colorWell.translatesAutoresizingMaskIntoConstraints = false
+        if #available(macOS 13.0, *) {
+            colorWell.colorWellStyle = .minimal
+        }
+        NSLayoutConstraint.activate([
+            colorWell.widthAnchor.constraint(equalToConstant: 28),
+            colorWell.heightAnchor.constraint(equalToConstant: 28)
+        ])
+        selectionBorderColorWell = colorWell
+        borderHeader.addArrangedSubview(colorWell)
+
+        inner.addArrangedSubview(borderHeader)
+        borderHeader.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+
+        let rgbRow = NSStackView()
+        rgbRow.orientation = .horizontal
+        rgbRow.alignment = .centerY
+        rgbRow.spacing = 8
+        rgbRow.translatesAutoresizingMaskIntoConstraints = false
+
+        selectionBorderRedTitleLabel = secondaryLabel(L10n.selectionBorderRedLabel)
+        selectionBorderRedField = makeRGBChannelField(value: Defaults.selectionBorderRed)
+        selectionBorderGreenTitleLabel = secondaryLabel(L10n.selectionBorderGreenLabel)
+        selectionBorderGreenField = makeRGBChannelField(value: Defaults.selectionBorderGreen)
+        selectionBorderBlueTitleLabel = secondaryLabel(L10n.selectionBorderBlueLabel)
+        selectionBorderBlueField = makeRGBChannelField(value: Defaults.selectionBorderBlue)
+        rgbRow.addArrangedSubview(selectionBorderRedTitleLabel)
+        rgbRow.addArrangedSubview(selectionBorderRedField)
+        rgbRow.addArrangedSubview(selectionBorderGreenTitleLabel)
+        rgbRow.addArrangedSubview(selectionBorderGreenField)
+        rgbRow.addArrangedSubview(selectionBorderBlueTitleLabel)
+        rgbRow.addArrangedSubview(selectionBorderBlueField)
+        rgbRow.addArrangedSubview(flexSpacer())
+        inner.addArrangedSubview(rgbRow)
+
+        selectionBorderHintLabel = secondaryLabel(L10n.selectionBorderColorHint, wrapping: true)
+        inner.addArrangedSubview(selectionBorderHintLabel)
+        selectionBorderHintLabel.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
 
         let divider = rowDivider()
         inner.addArrangedSubview(divider)
@@ -834,6 +947,7 @@ class SettingsView: NSView {
         let preview = ShadowPreviewView()
         preview.translatesAutoresizingMaskIntoConstraints = false
         preview.shadowSize = CGFloat(Defaults.windowShadowSize)
+        preview.cornerRadius = CGFloat(Defaults.windowCornerRadius)
         windowShadowPreview = preview
         inner.addArrangedSubview(preview)
         preview.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
@@ -2995,7 +3109,7 @@ class SettingsView: NSView {
     private func refreshBottomAction() {
         guard let btn = launchButton else { return }
         if isStartup {
-            let allGranted = AppPermissions.allRequiredGranted
+            let allGranted = AppPermissions.canLaunchApp
             btn.update(symbolName: "power", title: L10n.launchApp, tint: .systemGreen)
             btn.isEnabled = allGranted
         } else {
@@ -3234,6 +3348,66 @@ class SettingsView: NSView {
         updateWindowShadowControlsEnabled()
     }
 
+    @objc private func windowCornerRadiusChanged(_ sender: NSSlider) {
+        Defaults.windowCornerRadius = sender.doubleValue
+        sender.doubleValue = Defaults.windowCornerRadius
+        windowCornerRadiusValueLabel?.stringValue = Self.windowCornerRadiusDisplayValue(
+            Defaults.windowCornerRadius
+        )
+        windowShadowPreview?.cornerRadius = CGFloat(Defaults.windowCornerRadius)
+    }
+
+    private func makeRGBChannelField(value: Int) -> NSTextField {
+        let field = NSTextField()
+        field.stringValue = "\(value)"
+        field.alignment = .center
+        field.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        field.controlSize = .small
+        field.target = self
+        field.action = #selector(selectionBorderRGBFieldChanged(_:))
+        field.translatesAutoresizingMaskIntoConstraints = false
+        let formatter = NumberFormatter()
+        formatter.minimum = 0
+        formatter.maximum = 255
+        formatter.allowsFloats = false
+        formatter.maximumFractionDigits = 0
+        field.formatter = formatter
+        field.widthAnchor.constraint(equalToConstant: 46).isActive = true
+        return field
+    }
+
+    @objc private func selectionBorderColorChanged(_ sender: NSColorWell) {
+        guard !isUpdatingSelectionBorderControls else { return }
+        CaptureSelectionChrome.applyBorderColor(sender.color)
+        refreshSelectionBorderControls()
+    }
+
+    @objc private func selectionBorderRGBFieldChanged(_ sender: NSTextField) {
+        guard !isUpdatingSelectionBorderControls else { return }
+        let value = Int(sender.doubleValue.rounded())
+        if sender === selectionBorderRedField {
+            Defaults.selectionBorderRed = value
+        } else if sender === selectionBorderGreenField {
+            Defaults.selectionBorderGreen = value
+        } else if sender === selectionBorderBlueField {
+            Defaults.selectionBorderBlue = value
+        }
+        refreshSelectionBorderControls()
+    }
+
+    private func refreshSelectionBorderControls() {
+        isUpdatingSelectionBorderControls = true
+        defer { isUpdatingSelectionBorderControls = false }
+        selectionBorderColorWell?.color = CaptureSelectionChrome.borderColor
+        selectionBorderRedField?.stringValue = "\(Defaults.selectionBorderRed)"
+        selectionBorderGreenField?.stringValue = "\(Defaults.selectionBorderGreen)"
+        selectionBorderBlueField?.stringValue = "\(Defaults.selectionBorderBlue)"
+    }
+
+    private static func windowCornerRadiusDisplayValue(_ value: Double) -> String {
+        "\(Int(value.rounded())) \(L10n.windowCornerRadiusUnit)"
+    }
+
     @objc private func recordingSystemAudioToggled(_ sender: NSSwitch) {
         Defaults.recordingSystemAudioEnabled = sender.state == .on
     }
@@ -3363,6 +3537,7 @@ class SettingsView: NSView {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone") else {
             return
         }
+        NSApp.activate(ignoringOtherApps: true)
         NSWorkspace.shared.open(url)
     }
 
@@ -3387,7 +3562,7 @@ class SettingsView: NSView {
 
     @objc private func launchClicked() {
         if isStartup {
-            guard AppPermissions.allRequiredGranted else {
+            guard AppPermissions.canLaunchApp else {
                 showPermissionsTab()
                 refreshPermissionStatus()
                 return
@@ -5291,6 +5466,17 @@ class SettingsView: NSView {
         windowShadowSubtitleLabel?.stringValue = L10n.windowShadowToggleHint
         windowShadowSizeTitleLabel?.stringValue = L10n.windowShadowSizeLabel
         windowShadowSizeHintLabel?.stringValue = L10n.windowShadowSizeHint
+        windowCornerRadiusTitleLabel?.stringValue = L10n.windowCornerRadiusLabel
+        windowCornerRadiusHintLabel?.stringValue = L10n.windowCornerRadiusHint
+        windowCornerRadiusValueLabel?.stringValue = Self.windowCornerRadiusDisplayValue(
+            Defaults.windowCornerRadius
+        )
+        selectionBorderTitleLabel?.stringValue = L10n.selectionBorderColorLabel
+        selectionBorderHintLabel?.stringValue = L10n.selectionBorderColorHint
+        selectionBorderRedTitleLabel?.stringValue = L10n.selectionBorderRedLabel
+        selectionBorderGreenTitleLabel?.stringValue = L10n.selectionBorderGreenLabel
+        selectionBorderBlueTitleLabel?.stringValue = L10n.selectionBorderBlueLabel
+        refreshSelectionBorderControls()
         beautifyAutoTitleLabel?.stringValue = L10n.beautifyAutoToggleLabel
         beautifyAutoSubtitleLabel?.stringValue = L10n.beautifyAutoToggleHint
         beautifyPresetTitleLabel?.stringValue = L10n.beautifyDefaultPresetLabel
@@ -6046,6 +6232,7 @@ private final class BeautifySettingsSwatchView: NSView {
 /// so the user sees how high the captured window will appear to float.
 private final class ShadowPreviewView: NSView {
     var shadowSize: CGFloat = 22 { didSet { needsDisplay = true } }
+    var cornerRadius: CGFloat = 16 { didSet { needsDisplay = true } }
     var isEffectEnabled: Bool = true { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -6070,7 +6257,8 @@ private final class ShadowPreviewView: NSView {
             width: cardW,
             height: cardH
         )
-        let radius: CGFloat = 9
+        let maxRadius = min(cardRect.width, cardRect.height) / 2
+        let radius = min(max(0, cornerRadius * 0.55), maxRadius)
         let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
 
         guard let ctx = NSGraphicsContext.current else { return }

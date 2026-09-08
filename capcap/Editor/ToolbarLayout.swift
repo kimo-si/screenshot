@@ -164,12 +164,14 @@ extension ToolbarItemID {
         return EditorShortcutRegistry.displayString(for: .toolbar(self))
     }
 
-    /// Icon tint in the resting state.
+    // 按参考图区分普通工具、表情和输出操作的颜色
     var normalColor: NSColor {
         switch self {
         case .close:   return toolbarDangerRed
-        case .confirm: return accentGreen
-        default:       return .labelColor
+        case .save:    return FrostedHUDChrome.saveColor
+        case .confirm: return FrostedHUDChrome.confirmColor
+        case .emoji:   return FrostedHUDChrome.emojiColor
+        default:       return FrostedHUDChrome.iconColor
         }
     }
 
@@ -178,7 +180,7 @@ extension ToolbarItemID {
     var selectedColor: NSColor {
         switch kind {
         case .toggleTool, .toggleAction:
-            return accentGreen
+            return FrostedHUDChrome.confirmColor
         case .momentary, .dragHandle:
             return normalColor
         }
@@ -187,7 +189,7 @@ extension ToolbarItemID {
 
 /// Red used for the cancel button's icon. Mirrors the literal previously
 /// inlined in `ToolbarView.setupButtons()`.
-let toolbarDangerRed = NSColor(red: 1.0, green: 0.35, blue: 0.35, alpha: 1.0)
+let toolbarDangerRed = FrostedHUDChrome.cancelColor
 
 /// User-customizable assignment of every toolbar item to the primary
 /// (horizontal) toolbar, the side (vertical) toolbar, or hidden.

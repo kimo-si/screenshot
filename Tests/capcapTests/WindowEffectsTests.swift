@@ -82,6 +82,17 @@ final class WindowEffectsTests: XCTestCase {
         XCTAssertEqual(try alpha(at: CGPoint(x: 90, y: 50), in: result), 255)
     }
 
+    func testRoundedCornersHonorsExplicitPixelRadius() throws {
+        let image = makeOpaqueImage(width: 80, height: 80)
+
+        let square = WindowEffects.roundedCorners(image, radiusPoints: 0)
+        XCTAssertEqual(try alpha(at: CGPoint(x: 0, y: 0), in: square), 255)
+
+        let rounded = WindowEffects.roundedCorners(image, radiusPoints: 20)
+        XCTAssertEqual(try alpha(at: CGPoint(x: 0, y: 0), in: rounded), 0)
+        XCTAssertEqual(try alpha(at: CGPoint(x: 40, y: 40), in: rounded), 255)
+    }
+
     private func makeOpaqueImage(width: Int, height: Int) -> NSImage {
         makeImage(width: width, height: height) { context in
             context.setFillColor(NSColor.white.cgColor)

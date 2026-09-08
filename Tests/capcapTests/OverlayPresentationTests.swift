@@ -357,6 +357,53 @@ final class OverlayPresentationTests: XCTestCase {
         XCTAssertEqual(controller.currentMagnifierLensPanelFormat, .hex)
     }
 
+    func testHShortcutOpensHistoryLibraryFromMagnifier() throws {
+        _ = NSApplication.shared
+        let previousHistoryEnabled = Defaults.historyCacheEnabled
+        Defaults.historyCacheEnabled = true
+        var openedHistory = false
+        let controller = OverlayWindowController(
+            snapshotProvider: ControlledScreenSnapshotProvider(delay: 2),
+            onOpenHistoryLibrary: { openedHistory = true },
+            onComplete: { _ in }
+        )
+        defer {
+            if !controller.isCaptureSessionEnded {
+                controller.cancel()
+            }
+            Defaults.historyCacheEnabled = previousHistoryEnabled
+        }
+
+        controller.activate()
+
+        let selectionView = try XCTUnwrap(
+            controller.activeSelectionViews.first(where: { $0.window?.isKeyWindow == true })
+        )
+        let windowNumber = try XCTUnwrap(selectionView.window?.windowNumber)
+        let event = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: windowNumber,
+                context: nil,
+                characters: "h",
+                charactersIgnoringModifiers: "h",
+                isARepeat: false,
+                keyCode: 4
+            )
+        )
+
+        XCTAssertTrue(controller.isMagnifierLensPanelPresented)
+        NSApp.sendEvent(event)
+        drainMainRunLoop()
+
+        XCTAssertTrue(openedHistory)
+        XCTAssertTrue(controller.isCaptureSessionEnded)
+        XCTAssertFalse(controller.isMagnifierLensPanelPresented)
+    }
+
     func testCaptureStartsWithCrosshairAndPointerEventsKeepIt() throws {
         _ = NSApplication.shared
         let originalCursor = NSCursor.current

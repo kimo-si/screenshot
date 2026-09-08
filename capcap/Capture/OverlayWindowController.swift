@@ -108,6 +108,7 @@ class OverlayWindowController {
     private var pendingSelection: PendingSelection?
     private let onComplete: (NSImage?) -> Void
     private let onRequestFocusReturn: (() -> Void)?
+    private let onOpenHistoryLibrary: (() -> Void)?
     private let onRecordingSelection: ((NSRect, NSScreen) -> Void)?
     private let onSuspend: ((SuspendedEditDraft) -> Void)?
     private let postCaptureAction: PostCaptureAction
@@ -272,6 +273,7 @@ class OverlayWindowController {
         onRecordingSelection: ((NSRect, NSScreen) -> Void)? = nil,
         onRequestFocusReturn: (() -> Void)? = nil,
         onSuspend: ((SuspendedEditDraft) -> Void)? = nil,
+        onOpenHistoryLibrary: (() -> Void)? = nil,
         onComplete: @escaping (NSImage?) -> Void
     ) {
         self.presetImage = nil
@@ -294,6 +296,7 @@ class OverlayWindowController {
         self.onRecordingSelection = onRecordingSelection
         self.onRequestFocusReturn = onRequestFocusReturn
         self.onSuspend = onSuspend
+        self.onOpenHistoryLibrary = onOpenHistoryLibrary
         self.onComplete = onComplete
     }
 
@@ -336,6 +339,7 @@ class OverlayWindowController {
         self.onRecordingSelection = nil
         self.onRequestFocusReturn = onRequestFocusReturn
         self.onSuspend = onSuspend
+        self.onOpenHistoryLibrary = nil
         self.onComplete = onComplete
     }
 
@@ -377,6 +381,7 @@ class OverlayWindowController {
         self.onRecordingSelection = onRecordingSelection
         self.onRequestFocusReturn = onRequestFocusReturn
         self.onSuspend = onSuspend
+        self.onOpenHistoryLibrary = nil
         self.onComplete = onComplete
     }
 
@@ -727,6 +732,9 @@ class OverlayWindowController {
                 return nil
             }
             if self?.handleMagnifierLensPanelCopyShortcut(for: event, allowsPlainC: true) == true {
+                return nil
+            }
+            if self?.handleMagnifierLensPanelHistoryShortcut(for: event) == true {
                 return nil
             }
             if self?.editController?.confirmCropFromKeyboard(for: event) == true {
@@ -1388,6 +1396,22 @@ class OverlayWindowController {
         return true
     }
 
+    /// H opens the history / annotation library while the startup magnifier is
+    /// visible. Once a selection has produced an editor, H is left for the
+    /// highlighter tool.
+    private func handleMagnifierLensPanelHistoryShortcut(for event: NSEvent) -> Bool {
+        guard magnifierLensPanelActive, editController == nil else { return false }
+        guard Defaults.isHistoryCacheAvailable else { return false }
+        guard event.keyCode == 4 else { return false } // kVK_ANSI_H
+        let modifierMask: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        guard event.modifierFlags.intersection(modifierMask).isEmpty else { return false }
+        if event.isARepeat { return true }
+        let openHistory = onOpenHistoryLibrary
+        cancel()
+        openHistory?()
+        return true
+    }
+
     private func copyMagnifierLensPanelColor(_ sample: MagnifierLensPanelWindow.Sample) {
         let hex = String(format: "#%02X%02X%02X", sample.r, sample.g, sample.b)
         let rgb = L10n.magnifierLensPanelRgbString(r: sample.r, g: sample.g, b: sample.b)
@@ -1982,7 +2006,8 @@ extension OverlayWindowController: SelectionViewDelegate {
             return windowBaseImage
         }
         if let preSnapshot {
-            return ScreenCapturer.crop(from: preSnapshot, captureRect: captureRect, screen: screen)
+            let cropped = ScreenCapturer.crop(from: preSnapshot, captureRect: captureRect, screen: screen)
+            return cropped.map(WindowEffects.applyCaptureCornerRadius)
         }
         return nil
     }

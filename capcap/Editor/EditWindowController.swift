@@ -572,10 +572,8 @@ class EditWindowController {
         canvasView?.captureScreen = screen
 
         if isBeautifyActive {
-            canvasView?.beautifyCornerRadius = isWindowCapture ? nil : BeautifyRenderer.innerCornerRadius
-            beautifyContainerView?.setInnerShadowCornerRadius(
-                isWindowCapture ? WindowEffects.cornerRadiusPoints : BeautifyRenderer.innerCornerRadius
-            )
+            canvasView?.beautifyCornerRadius = nil
+            beautifyContainerView?.setInnerShadowCornerRadius(WindowEffects.cornerRadiusPoints)
             beautifyContainerView?.setInnerShadowInset(
                 isWindowCapture ? BeautifyRenderer.windowInnerShadowInset : 0
             )
@@ -1235,12 +1233,10 @@ class EditWindowController {
         // Beautify and annotation tools coexist — don't clear the active tool.
 
         // The canvas draws its content (previewImage or externalBaseImage)
-        // inside the beautify card. Normal selections use a fixed card clip;
-        // clicked-window captures use the window's own rounded alpha mask.
-        canvasView.beautifyCornerRadius = isWindowCapture ? nil : BeautifyRenderer.innerCornerRadius
-        container.setInnerShadowCornerRadius(
-            isWindowCapture ? WindowEffects.cornerRadiusPoints : BeautifyRenderer.innerCornerRadius
-        )
+        // inside the beautify card. Capture corner radius is already baked
+        // into the screenshot alpha, so the card does not extra-clip.
+        canvasView.beautifyCornerRadius = nil
+        container.setInnerShadowCornerRadius(WindowEffects.cornerRadiusPoints)
         container.setInnerShadowInset(
             isWindowCapture ? BeautifyRenderer.windowInnerShadowInset : 0
         )
@@ -2656,10 +2652,8 @@ class EditWindowController {
         guard let canvasView, let container = beautifyContainerView else { return }
         let preset = BeautifyPreset.preset(forID: state.presetID) ?? .defaultPreset
 
-        canvasView.beautifyCornerRadius = isWindowCapture ? nil : BeautifyRenderer.innerCornerRadius
-        container.setInnerShadowCornerRadius(
-            isWindowCapture ? WindowEffects.cornerRadiusPoints : BeautifyRenderer.innerCornerRadius
-        )
+        canvasView.beautifyCornerRadius = nil
+        container.setInnerShadowCornerRadius(WindowEffects.cornerRadiusPoints)
         container.setInnerShadowInset(
             isWindowCapture ? BeautifyRenderer.windowInnerShadowInset : 0
         )
@@ -2702,7 +2696,7 @@ class EditWindowController {
             fallbackBaseImage = windowShapedBaseImage(from: fallbackBaseImage)
         }
 
-        let annotationClipMask = isWindowCapture && canvasView?.hasPreviewImage != true
+        let annotationClipMask = canvasView?.hasPreviewImage != true
             ? fallbackBaseImage
             : nil
 
@@ -2713,32 +2707,38 @@ class EditWindowController {
             beautifyShadowEnabled: isBeautifyActive ? currentBeautifyShadowEnabled : true,
             wallpaperImage: isBeautifyActive ? beautifyContainerView?.wallpaperImage : nil,
             annotationClipMask: annotationClipMask,
-            beautifyInnerClipRadius: isBeautifyActive && isWindowCapture ? nil : BeautifyRenderer.innerCornerRadius,
-            beautifyInnerShadowCornerRadius: isBeautifyActive && isWindowCapture
-                ? WindowEffects.cornerRadiusPoints
-                : BeautifyRenderer.innerCornerRadius,
+            beautifyInnerClipRadius: isBeautifyActive ? nil : BeautifyRenderer.innerCornerRadius,
+            beautifyInnerShadowCornerRadius: WindowEffects.cornerRadiusPoints,
             beautifyInnerShadowInset: isBeautifyActive && isWindowCapture
                 ? BeautifyRenderer.windowInnerShadowInset
                 : 0
         ) else { return nil }
 
-        // Window captures get rounded corners — and, when enabled, a
-        // macOS-style drop shadow — mimicking the system's native window
-        // screenshots. Skipped while beautify is active (beautify supplies its
-        // own card styling) and for scroll-capture stitched results.
-        guard isWindowCapture, !isBeautifyActive, canvasView?.hasPreviewImage != true else {
+        // Bake the capture corner radius into the exported image for both
+        // window and free-drag captures. Window captures can also add a
+        // macOS-style drop shadow. Beautify and scroll-stitch results skip
+        // this pass because they already have their own silhouette.
+        guard !isBeautifyActive, canvasView?.hasPreviewImage != true else {
             return composite
         }
 
-        let rounded = windowBaseImage == nil ? WindowEffects.roundedCorners(composite) : composite
-        guard Defaults.windowShadowEnabled else { return rounded }
+        let rounded: NSImage
+        if isWindowCapture, windowBaseImage != nil {
+            rounded = composite
+        } else {
+            rounded = WindowEffects.applyCaptureCornerRadius(composite)
+        }
+        guard isWindowCapture, Defaults.windowShadowEnabled else { return rounded }
         return WindowEffects.withShadow(rounded, size: CGFloat(Defaults.windowShadowSize))
     }
 
     private func windowShapedBaseImage(from image: NSImage?) -> NSImage? {
         guard let image else { return nil }
-        guard isWindowCapture, canvasView?.hasPreviewImage != true else { return image }
-        return windowBaseImage ?? WindowEffects.roundedCorners(image)
+        guard canvasView?.hasPreviewImage != true else { return image }
+        if isWindowCapture {
+            return windowBaseImage ?? WindowEffects.applyCaptureCornerRadius(image)
+        }
+        return WindowEffects.applyCaptureCornerRadius(image)
     }
 
     /// While scroll capture runs capcap is deactivated, so a local key monitor
@@ -2863,6 +2863,9 @@ class EditWindowController {
     }
 
     private func styleFloatingHUD(_ view: NSView) {
+        // Frosted HUD bars own their glass + shadow; layer-backing the
+        // host would isolate compositing and flatten the blur.
+        if view is FrostedHUDView { return }
         view.wantsLayer = true
         view.layer?.shadowColor = NSColor.black.cgColor
         view.layer?.shadowOpacity = 0.25
@@ -2946,7 +2949,7 @@ final class EditorScrollView: NSScrollView {
 /// A row (horizontal) or column (vertical) of editor buttons built from a
 /// `[ToolbarItemID]`. Both the primary toolbar and the side toolbar are
 /// instances of this class — only `orientation` and the item list differ.
-class ToolbarView: NSView {
+class ToolbarView: FrostedHUDView {
     enum Orientation { case horizontal, vertical }
 
     /// Button run geometry. `preferredSize` derives the capsule size from
@@ -3085,12 +3088,6 @@ class ToolbarView: NSView {
             btn.alphaValue = hasProvider ? 1.0 : 0.35
         }
         return btn
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
     }
 
     @objc private func buttonTapped(_ sender: ToolButton) {
@@ -3413,7 +3410,7 @@ private final class ScrollCaptureControlWindow: NSPanel {
     }
 }
 
-private final class ScrollCaptureControlView: NSView {
+private final class ScrollCaptureControlView: FrostedHUDView {
     private let onTap: () -> Void
 
     init(frame: NSRect, onTap: @escaping () -> Void) {
@@ -3443,12 +3440,6 @@ private final class ScrollCaptureControlView: NSView {
 
     @objc private func buttonTapped() {
         onTap()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
     }
 }
 
@@ -3496,7 +3487,7 @@ private final class ScrollCropControlWindow: NSPanel {
     }
 }
 
-private final class ScrollCropControlView: NSView {
+private final class ScrollCropControlView: FrostedHUDView {
     private let onConfirm: () -> Void
 
     init(frame: NSRect, onConfirm: @escaping () -> Void) {
@@ -3526,12 +3517,6 @@ private final class ScrollCropControlView: NSView {
 
     @objc private func confirmTapped() {
         onConfirm()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
     }
 }
 
@@ -3612,7 +3597,7 @@ private final class ScrollPreviewWindow: NSPanel {
 
 // MARK: - Emoji Sub-toolbar
 
-private final class EmojiSubToolbar: NSView {
+private final class EmojiSubToolbar: FrostedHUDView {
     static let preferredVisibleWidth: CGFloat = horizontalPad * 2
         + moreButtonSize
         + moreButtonGap
@@ -3717,12 +3702,6 @@ private final class EmojiSubToolbar: NSView {
 
     @objc private func showMoreEmojiPicker() {
         onMoreRequested?(moreButton)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
     }
 }
 
@@ -3986,7 +3965,7 @@ private enum ShapeStrokePreviewShape {
     case ellipse
 }
 
-private class ColorSizeSubToolbar: NSView {
+private class ColorSizeSubToolbar: FrostedHUDView {
     var currentColor: NSColor = EditorStyleDefaults.primaryColor
     var currentSize: CGFloat = 3.0
     var currentArrowStyle: ArrowStyle?
@@ -4311,16 +4290,11 @@ private class ColorSizeSubToolbar: NSView {
                abs(ac.blueComponent - bc.blueComponent) < 0.01
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
-    }
 }
 
 // MARK: - Mosaic Sub-toolbar
 
-private class MosaicSubToolbar: NSView {
+private class MosaicSubToolbar: FrostedHUDView {
     var currentBlockSize: CGFloat
     var onBlockSizeBegan: (() -> Void)?
     var onBlockSizeChanged: ((CGFloat) -> Void)?
@@ -4381,18 +4355,12 @@ private class MosaicSubToolbar: NSView {
             min(CGFloat(Defaults.mosaicBlockSizeMax), size)
         )
     }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
-    }
 }
 
 // MARK: - Text Sub-toolbar
 
 /// Text-tool sub-toolbar — color swatches plus a 10–100 font-size slider.
-private class TextSubToolbar: NSView {
+private class TextSubToolbar: FrostedHUDView {
     var currentColor: NSColor = .red
     var currentFontSize: CGFloat = CGFloat(Defaults.lastTextFontSize)
     var strokeEnabled: Bool = false
@@ -4613,12 +4581,6 @@ private class TextSubToolbar: NSView {
         return abs(ac.redComponent - bc.redComponent) < 0.01 &&
                abs(ac.greenComponent - bc.greenComponent) < 0.01 &&
                abs(ac.blueComponent - bc.blueComponent) < 0.01
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
     }
 }
 
@@ -5532,7 +5494,7 @@ private final class HUDCheckboxButton: NSButton {
 
 // MARK: - Beautify Sub-toolbar
 
-private class BeautifySubToolbar: NSView {
+private class BeautifySubToolbar: FrostedHUDView {
     var onPresetSelected: ((BeautifyPreset) -> Void)?
     var onMoreRequested: ((NSView) -> Void)?
     var currentPresetID: String? {
@@ -5755,12 +5717,6 @@ private class BeautifySubToolbar: NSView {
             !presets.contains(where: { $0.id == selectedID })
         } ?? false
     }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
-        AdaptiveChrome.toolbarBackground.setFill()
-        path.fill()
-    }
 }
 
 private final class BeautifyPresetPickerView: NSView {
@@ -5941,7 +5897,7 @@ private class BeautifySwatchView: NSView {
 
 // MARK: - Selection Chrome Overlay
 
-/// Sits above the editor's `canvasScrollView` (so the dashed border + handles
+/// Sits above the editor's `canvasScrollView` (so the solid border + handles
 /// stay visible even when beautify expands the canvas frame with a gradient
 /// background). Empty space falls through; only handle hits are claimed, and
 /// they drive `SelectionView`'s external resize API so the rest of the editor
@@ -5952,11 +5908,9 @@ final class SelectionChromeOverlay: NSView {
     private(set) var selectionRectInView: NSRect = .zero
     private(set) var isActiveAndVisible: Bool = false
 
-    private let accentColor = NSColor(red: 0, green: 212.0/255.0, blue: 106.0/255.0, alpha: 1.0)
     private let handleSize: CGFloat = 8
     private let handleHitSize: CGFloat = 12
     private let borderWidth: CGFloat = 2.0
-    private let dashPattern: [CGFloat] = [6, 4]
 
     private var dragHandle: SelectionView.HandlePosition?
     private var dragOriginalRect: NSRect = .zero
@@ -6083,10 +6037,14 @@ final class SelectionChromeOverlay: NSView {
         context.saveGState()
         defer { context.restoreGState() }
 
-        context.setStrokeColor(accentColor.cgColor)
+        let accent = CaptureSelectionChrome.borderColor
+        context.setStrokeColor(accent.cgColor)
         context.setLineWidth(borderWidth)
-        context.setLineDash(phase: 0, lengths: dashPattern)
-        context.stroke(rect.insetBy(dx: -1, dy: -1))
+        context.setLineDash(phase: 0, lengths: [])
+        context.addPath(
+            CaptureSelectionChrome.path(for: rect.insetBy(dx: -1, dy: -1))
+        )
+        context.strokePath()
         context.setLineDash(phase: 0, lengths: [])
 
         for pos in SelectionView.handlePositions(for: rect) {
@@ -6096,7 +6054,7 @@ final class SelectionChromeOverlay: NSView {
                 width: handleSize,
                 height: handleSize
             )
-            context.setFillColor(accentColor.cgColor)
+            context.setFillColor(accent.cgColor)
             context.fillEllipse(in: handleRect)
         }
 

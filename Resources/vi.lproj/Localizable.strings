@@ -30,9 +30,17 @@
 "countdownHint" = "Giữ ⌥ Option rồi nhấn đúp ⌘ hoặc nhấn phím tắt chụp màn hình để bắt đầu đếm ngược trước khi chụp, Esc để hủy";
 "countdownSecondsSuffix" = "giây";
 "windowShadowToggleLabel" = "Đổ bóng khi chụp cửa sổ";
-"windowShadowToggleHint" = "Bo góc ảnh chụp cửa sổ và thêm bóng đổ kiểu macOS";
+"windowShadowToggleHint" = "Thêm bóng đổ kiểu macOS khi chụp cửa sổ";
 "windowShadowSizeLabel" = "Kích thước bóng";
 "windowShadowSizeHint" = "Giá trị lớn hơn làm bóng mờ mềm hơn và lan rộng hơn, khiến cửa sổ trông nổi cao hơn";
+"windowCornerRadiusLabel" = "Bo góc";
+"windowCornerRadiusHint" = "Bán kính bo bốn góc ảnh chụp cửa sổ và vùng chọn, đơn vị px. Ảnh xuất theo cùng bán kính. 0 là góc vuông";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "Màu viền vùng chọn";
+"selectionBorderColorHint" = "Màu đường viền nét đứt khi chọn vùng chụp. RGB 0–255";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Chụp màn hình";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX: %@";
 "magnifierLensPanelRgb" = "RGB: %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "Sao chép màu(C)";
+"magnifierLensPanelCopyHint" = "Nhấn C để sao chép màu";
 "magnifierLensPanelFormatHint" = "Định dạng(F)";
+"magnifierLensPanelHistoryHint" = "Nhấn H để mở thư viện";
 "magnifierLensPanelAspectFree" = "Tự do";
 "magnifierLensPanelAspectHint" = "Tỷ lệ ảnh(R)";
 /* Tải tệp lên */

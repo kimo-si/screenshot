@@ -30,9 +30,17 @@
 "countdownHint" = "⌥ Option 을 누른 채 ⌘ 를 두 번 누르거나 스크린샷 단축키를 누르면 캡처 전에 카운트다운이 시작되며 Esc 로 취소";
 "countdownSecondsSuffix" = "초";
 "windowShadowToggleLabel" = "창 캡처 그림자";
-"windowShadowToggleHint" = "창을 선택해 캡처할 때 모서리를 둥글게 하고 macOS 스타일 그림자를 추가합니다";
+"windowShadowToggleHint" = "창을 선택해 캡처할 때 macOS 스타일 그림자를 추가합니다";
 "windowShadowSizeLabel" = "그림자 크기";
 "windowShadowSizeHint" = "값이 클수록 그림자가 부드럽고 넓게 퍼져 창이 더 높이 떠 보입니다";
+"windowCornerRadiusLabel" = "모서리 반경";
+"windowCornerRadiusHint" = "창 스크린샷과 영역 선택 네 모서리의 둥근 정도(px). 내보낸 이미지도 같은 값으로 잘립니다. 0이면 직각";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "선택 테두리 색";
+"selectionBorderColorHint" = "스크린샷을 선택할 때 점선 테두리 색. RGB는 0–255";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "스크린샷";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX: %@";
 "magnifierLensPanelRgb" = "RGB: %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "색상 복사(C)";
+"magnifierLensPanelCopyHint" = "C 키로 색상 복사";
 "magnifierLensPanelFormatHint" = "색상 형식(F)";
+"magnifierLensPanelHistoryHint" = "H 키로 기록 열기";
 "magnifierLensPanelAspectFree" = "자유";
 "magnifierLensPanelAspectHint" = "캡처 비율(R)";
 /* 파일 업로드 */

@@ -30,9 +30,17 @@
 "countdownHint" = "Maintenez ⌥ Option puis double-appuyez sur ⌘ ou utilisez le raccourci de capture pour lancer un compte à rebours avant la capture, Échap pour annuler";
 "countdownSecondsSuffix" = "s";
 "windowShadowToggleLabel" = "Ombre des captures de fenêtre";
-"windowShadowToggleHint" = "Arrondit les coins des captures de fenêtre et ajoute une ombre portée façon macOS";
+"windowShadowToggleHint" = "Ajoute une ombre portée façon macOS aux captures de fenêtre";
 "windowShadowSizeLabel" = "Taille de l'ombre";
 "windowShadowSizeHint" = "Des valeurs élevées adoucissent et élargissent l'ombre : la fenêtre semble flotter plus haut";
+"windowCornerRadiusLabel" = "Rayon des coins";
+"windowCornerRadiusHint" = "Arrondit les quatre coins des captures de fenêtre et de zone. Les images exportées utilisent le même rayon. 0 conserve les angles droits";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "Bordure de sélection";
+"selectionBorderColorHint" = "Couleur de la bordure en pointillés pendant la sélection. RGB 0–255";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Capture d'écran";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX : %@";
 "magnifierLensPanelRgb" = "RGB : %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "Copier couleur(C)";
+"magnifierLensPanelCopyHint" = "Appuyez sur C pour copier";
 "magnifierLensPanelFormatHint" = "Format(F)";
+"magnifierLensPanelHistoryHint" = "Appuyez sur H pour l’historique";
 "magnifierLensPanelAspectFree" = "Libre";
 "magnifierLensPanelAspectHint" = "Ratio(R)";
 /* Téléversement de fichiers */

@@ -1,14 +1,20 @@
 import AppKit
 import QuartzCore
 
-/// Post-processing for window captures: clip the four corners to the rounded
-/// shape of a real macOS window, and add a soft system-style drop shadow.
-/// Applied only to single-window screenshots, never to free-drag regions.
+/// Post-processing for screenshot silhouettes: clip the four corners to the
+/// user-configured radius, and (for clicked-window captures) add a soft
+/// system-style drop shadow.
 enum WindowEffects {
-    /// Fallback corner radius when a real WindowServer alpha mask is not
-    /// available. Normal clicked-window captures use the system-provided mask
-    /// instead, because macOS varies the actual corner shape by OS/window style.
-    static let cornerRadiusPoints: CGFloat = 16
+    /// Corner radius for capture silhouettes, in points (1pt = 1px at 1×).
+    /// Used by window captures, free-drag regions, and the selection overlay.
+    static var cornerRadiusPoints: CGFloat {
+        CGFloat(Defaults.windowCornerRadius)
+    }
+
+    /// Apply the current capture corner-radius setting. Radius 0 is a no-op.
+    static func applyCaptureCornerRadius(_ image: NSImage) -> NSImage {
+        roundedCorners(image)
+    }
 
     private struct ShadowLayer {
         let blur: CGFloat
@@ -33,6 +39,7 @@ enum WindowEffects {
     /// fallback for cases where a clicked-window capture could not provide the
     /// real WindowServer alpha mask.
     static func roundedCorners(_ image: NSImage, radiusPoints: CGFloat = cornerRadiusPoints) -> NSImage {
+        guard radiusPoints > 0 else { return image }
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return image
         }
@@ -176,7 +183,7 @@ enum WindowEffects {
         ),
            let directWindowImage,
            let maskedImage = applyingAlphaMask(from: directWindowImage, to: snapshotImage) {
-            return maskedImage
+            return roundedCorners(maskedImage)
         }
 
         return roundedCorners(snapshotImage)

@@ -73,13 +73,20 @@ class SelectionView: NSView {
     }
 
     // Scroll capture mode: update border styling while the controller manages event routing.
-    var scrollCaptureActive = false
+    var scrollCaptureActive = false {
+        didSet {
+            if scrollCaptureActive != oldValue {
+                syncOverlayChrome()
+            }
+        }
+    }
 
     // When false, the selection frame becomes a fixed viewport.
     var selectionInteractionEnabled = true {
         didSet {
             if selectionInteractionEnabled != oldValue {
                 refreshCursorRects()
+                syncOverlayChrome()
                 needsDisplay = true
             }
         }
@@ -91,7 +98,7 @@ class SelectionView: NSView {
     var selectionAdjustmentBounds: NSRect?
     var aspectRatio: CGFloat? = nil
     var selectionSizeLabelOverride: String? {
-        didSet { needsDisplay = true }
+        didSet { syncOverlayChrome() }
     }
 
     // MARK: - Pre-captured Snapshot
@@ -103,6 +110,9 @@ class SelectionView: NSView {
     /// off-main-thread pre-capture path.
     func setBackgroundSnapshot(cgImage: CGImage, pointSize: NSSize) {
         backgroundSnapshot = NSImage(cgImage: cgImage, size: pointSize)
+        snapshotView.layer?.contents = cgImage
+        snapshotView.isHidden = false
+        syncOverlayChrome()
         needsDisplay = true
     }
 
@@ -118,9 +128,8 @@ class SelectionView: NSView {
     /// Set by OverlayWindowController so the view can detect windows under the cursor.
     var windowDetector: WindowDetector?
 
-    /// The window rect currently highlighted under the cursor (view coordinates).
-    /// This is clipped to the overlay's visible bounds so the hover cutout
-    /// stays drawable even when the real window extends off screen.
+    /// The window under the cursor, clipped to the overlay's visible bounds.
+    /// Retained only for explicit click-to-capture, never shown as a selection.
     private var hoverWindowRect: NSRect?
     /// The full detected window rect in view coordinates. This may extend
     /// outside `bounds`; use it for the actual clicked-window capture so the
@@ -132,15 +141,95 @@ class SelectionView: NSView {
     private var pendingWindowRect: NSRect?
     private var pendingWindowID: CGWindowID?
     private let windowClickThreshold: CGFloat = 4
+    private var lastAppActivationUptime: TimeInterval = 0
+
+    private let snapshotView = OverlayPassthroughView()
+    private let overlayCanvas = SelectionOverlayCanvas()
+    private let sizeBadge = SelectionSizeBadgeView()
+    private let dimmingLayer = CAShapeLayer()
+    private let borderLayer = CAShapeLayer()
+    private let handleLayers: [CALayer] = {
+        (0..<HandlePosition.allCases.count).map { _ in
+            let layer = CALayer()
+            layer.bounds = CGRect(x: 0, y: 0, width: 8, height: 8)
+            layer.cornerRadius = 4
+            layer.isHidden = true
+            return layer
+        }
+    }()
 
     // MARK: - Constants
 
-    private let accentColor = NSColor(red: 0, green: 212.0/255.0, blue: 106.0/255.0, alpha: 1.0)
     private let handleSize: CGFloat = 8
     private let handleHitSize: CGFloat = 12
     private let borderWidth: CGFloat = 2.0
-    private let dashPattern: [CGFloat] = [6, 4]
-    private let dimmingOverlayAlpha: CGFloat = 0.45
+    private let dimmingOverlayAlpha: CGFloat = 0.60
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureOverlayLayers()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureOverlayLayers()
+    }
+
+    private func configureOverlayLayers() {
+        snapshotView.wantsLayer = true
+        if snapshotView.layer == nil {
+            snapshotView.layer = CALayer()
+        }
+        snapshotView.layer?.contentsGravity = .resize
+        snapshotView.autoresizingMask = [.width, .height]
+        snapshotView.frame = bounds
+
+        overlayCanvas.autoresizingMask = [.width, .height]
+        overlayCanvas.frame = bounds
+        overlayCanvas.wantsLayer = true
+        if overlayCanvas.layer == nil {
+            overlayCanvas.layer = CALayer()
+        }
+        overlayCanvas.layer?.backgroundColor = NSColor.clear.cgColor
+
+        sizeBadge.isHidden = true
+
+        addSubview(snapshotView)
+        addSubview(overlayCanvas)
+        addSubview(sizeBadge)
+
+        dimmingLayer.fillColor = NSColor.black.withAlphaComponent(dimmingOverlayAlpha).cgColor
+        dimmingLayer.fillRule = .evenOdd
+        dimmingLayer.anchorPoint = .zero
+        dimmingLayer.frame = bounds
+
+        borderLayer.fillColor = nil
+        borderLayer.strokeColor = CaptureSelectionChrome.borderColor.cgColor
+        borderLayer.lineWidth = borderWidth
+        borderLayer.lineDashPattern = nil
+        borderLayer.anchorPoint = .zero
+        borderLayer.frame = bounds
+        borderLayer.isHidden = true
+
+        guard let overlayLayer = overlayCanvas.layer else { return }
+        overlayLayer.addSublayer(dimmingLayer)
+        overlayLayer.addSublayer(borderLayer)
+        for handle in handleLayers {
+            handle.backgroundColor = CaptureSelectionChrome.borderColor.cgColor
+            overlayLayer.addSublayer(handle)
+        }
+        syncOverlayChrome()
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        snapshotView.frame = bounds
+        overlayCanvas.frame = bounds
+        dimmingLayer.frame = overlayCanvas.bounds
+        borderLayer.frame = overlayCanvas.bounds
+        syncOverlayChrome()
+    }
 
     // MARK: - Public
 
@@ -154,7 +243,7 @@ class SelectionView: NSView {
     func updateSelectionRect(_ rect: NSRect) {
         selectionRect = rect
         state = .selected
-        needsDisplay = true
+        syncOverlayChrome()
         refreshCursorRects()
     }
 
@@ -169,7 +258,7 @@ class SelectionView: NSView {
         selectionRect = newRect
         state = .selected
         delegate?.selectionDidChange(rect: newRect, inView: self)
-        needsDisplay = true
+        syncOverlayChrome()
     }
 
     /// Mirror of `mouseUp`'s `.move` finalize: notify the delegate that the
@@ -194,7 +283,7 @@ class SelectionView: NSView {
         selectionRect = newRect
         state = .selected
         delegate?.selectionDidChange(rect: newRect, inView: self)
-        needsDisplay = true
+        syncOverlayChrome()
     }
 
     /// Mirror of `mouseUp`'s `.resize` finalize.
@@ -283,7 +372,7 @@ class SelectionView: NSView {
             return
         }
 
-        // On a highlighted window: defer confirmation until mouseUp.
+        // On a detected window: defer confirmation until mouseUp.
         // If the user drags past the threshold, fall through to free-form drawing.
         if state == .idle, let hoverRect = hoverWindowRect {
             pendingWindowRect = hoverWindowFullRect ?? hoverRect
@@ -297,7 +386,7 @@ class SelectionView: NSView {
             state = .drawing
             dragAction = .drawNew
             delegate?.selectionDidStart(reason: .newSelection)
-            needsDisplay = true
+            syncOverlayChrome()
             return
         }
 
@@ -337,7 +426,7 @@ class SelectionView: NSView {
         state = .drawing
         dragAction = .drawNew
         delegate?.selectionDidStart(reason: .newSelection)
-        needsDisplay = true
+        syncOverlayChrome()
     }
 
     private func shouldSuspendFromMaskDoubleClick(event: NSEvent, point: NSPoint) -> Bool {
@@ -383,7 +472,7 @@ class SelectionView: NSView {
                 aspectRatio: aspectRatio,
                 bounds: bounds
             )
-            needsDisplay = true
+            syncOverlayChrome()
 
         case .move:
             NSCursor.arrow.set()
@@ -394,7 +483,7 @@ class SelectionView: NSView {
             newRect = clampedForMove(newRect)
             selectionRect = newRect
             delegate?.selectionDidChange(rect: newRect, inView: self)
-            needsDisplay = true
+            syncOverlayChrome()
 
         case .resize(let handle):
             SelectionView.setCursorForHandle(handle)
@@ -407,7 +496,7 @@ class SelectionView: NSView {
             )
             selectionRect = newRect
             delegate?.selectionDidChange(rect: newRect, inView: self)
-            needsDisplay = true
+            syncOverlayChrome()
 
         case .none:
             break
@@ -451,24 +540,24 @@ class SelectionView: NSView {
                 selectionRect = windowRect
                 state = .selected
                 delegate?.selectionDidComplete(rect: windowRect, inView: self, isWindowSelection: true, windowID: windowID)
-                needsDisplay = true
+                syncOverlayChrome()
                 return
             }
             guard let rect = selectionRect, rect.width >= 5, rect.height >= 5 else {
                 selectionRect = nil
                 state = .idle
-                needsDisplay = true
+                syncOverlayChrome()
                 return
             }
             state = .selected
             delegate?.selectionDidComplete(rect: rect, inView: self, isWindowSelection: false, windowID: nil)
-            needsDisplay = true
+            syncOverlayChrome()
 
         case .move, .resize:
             if let rect = selectionRect {
                 delegate?.selectionDidComplete(rect: rect, inView: self, isWindowSelection: false, windowID: nil)
             }
-            needsDisplay = true
+            syncOverlayChrome()
 
         case .none:
             break
@@ -479,13 +568,18 @@ class SelectionView: NSView {
         guard selectionInteractionEnabled else { return }
         let point = convert(event.locationInWindow, from: nil)
 
-        // In idle state, detect windows under cursor for hover highlight
+        // In idle state, detect windows only for explicit click-to-capture
         if state == .idle && !selectionLocked {
             // capcap may lose activation over time, which causes WindowServer
             // to ignore the crosshair cursor rect registered in resetCursorRects.
-            // Re-activate on every mouse-move so the cursor stays crosshair.
+            // Re-activate occasionally so the cursor stays crosshair, but not
+            // on every mouse-move — that hitch is worse than a stale cursor.
             if !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - lastAppActivationUptime > 0.5 {
+                    lastAppActivationUptime = now
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
             NSCursor.crosshair.set()
             updateWindowHover(with: event)
@@ -565,7 +659,7 @@ class SelectionView: NSView {
                 hoverWindowRect = clamped
                 hoverWindowFullRect = viewRect
                 hoverWindowID = detected.windowID
-                needsDisplay = true
+                syncOverlayChrome()
             }
         } else {
             clearHover()
@@ -577,90 +671,111 @@ class SelectionView: NSView {
             hoverWindowRect = nil
             hoverWindowFullRect = nil
             hoverWindowID = nil
-            needsDisplay = true
+            syncOverlayChrome()
         }
     }
 
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        defer {
-            reportFirstDrawIfNeeded()
-            scheduleFirstFramePresentationIfNeeded()
-        }
+        reportFirstDrawIfNeeded()
+        scheduleFirstFramePresentationIfNeeded()
+    }
 
-        // Draw pre-captured screen snapshot as background so transient
-        // menus/popups remain visible even after they dismiss.
-        // Skip during scroll capture so live scrolling content shows through.
-        if let snapshot = backgroundSnapshot, !scrollCaptureActive {
-            snapshot.draw(in: bounds)
-        }
+    private func syncOverlayChrome() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
 
-        // Hover highlight for window detection (idle state, before any click)
-        if state == .idle, let hoverRect = hoverWindowRect {
-            // Dark overlay with cutout (even-odd fill preserves snapshot underneath)
-            let path = CGMutablePath()
-            path.addRect(bounds)
-            path.addRect(hoverRect)
-            context.setFillColor(NSColor.black.withAlphaComponent(dimmingOverlayAlpha).cgColor)
-            context.addPath(path)
-            context.fillPath(using: .evenOdd)
-            // Solid accent border
-            context.setStrokeColor(accentColor.cgColor)
-            context.setLineWidth(borderWidth + 1)
-            context.stroke(hoverRect.insetBy(dx: -1.5, dy: -1.5))
-            // Size label
-            SelectionView.drawSizeLabel(context: context, rect: hoverRect)
-            return
-        }
+        snapshotView.isHidden = backgroundSnapshot == nil || scrollCaptureActive
+            || snapshotView.layer?.contents == nil
+        snapshotView.frame = bounds
+        overlayCanvas.frame = bounds
+        dimmingLayer.frame = overlayCanvas.bounds
+        borderLayer.frame = overlayCanvas.bounds
 
-        // In idle state with no selection, just show the snapshot (already drawn above)
-        guard let rect = selectionRect, (state == .drawing || state == .selected),
-              rect.width > 0 || rect.height > 0 else {
-            return
-        }
+        let cutout: NSRect?
+        var borderRect: NSRect?
+        var showHandles = false
+        var badgeAnchor: NSRect?
+        var badgeText: String?
 
-        // Dark overlay with cutout (even-odd fill preserves snapshot underneath).
-        // During scroll capture, enlarge the cutout by 0.5pt so anti-aliasing
-        // at the cutout edge falls outside the captured rect instead of
-        // darkening its first pixel — otherwise every frame's bottom edge
-        // leaves a gray line at each stitch seam.
-        let path = CGMutablePath()
-        path.addRect(bounds)
-        let cutoutRect = scrollCaptureActive ? rect.insetBy(dx: -0.5, dy: -0.5) : rect
-        path.addRect(cutoutRect)
-        context.setFillColor(NSColor.black.withAlphaComponent(dimmingOverlayAlpha).cgColor)
-        context.addPath(path)
-        context.fillPath(using: .evenOdd)
-
-        // Draw border — solid red during scroll capture, green dashed otherwise
-        if scrollCaptureActive {
-            // ScreenCaptureKit sees the overlay panel, so any stroke pixels
-            // inside `rect` bleed into every captured frame and produce thin
-            // red lines at the left/right edges and at each stitch seam.
-            // Inset enough that the stroke (and its anti-aliased fringe) sits
-            // entirely outside the captured rect.
-            let strokeWidth: CGFloat = borderWidth + 1
-            let outerInset = -(strokeWidth / 2 + 1)
-            context.setStrokeColor(NSColor.systemRed.cgColor)
-            context.setLineWidth(strokeWidth)
-            context.stroke(rect.insetBy(dx: outerInset, dy: outerInset))
+        if state == .idle {
+            // 未主动选择时保持全屏遮罩，不把鼠标下的窗口显示成预选区域
+            cutout = nil
+        } else if let rect = selectionRect, (state == .drawing || state == .selected),
+                  rect.width > 0 || rect.height > 0 {
+            cutout = scrollCaptureActive ? rect.insetBy(dx: -0.5, dy: -0.5) : rect
+            borderRect = rect
+            if state == .selected && selectionInteractionEnabled {
+                showHandles = true
+                badgeAnchor = rect
+            } else if state == .selected, let selectionSizeLabelOverride {
+                badgeAnchor = rect
+                badgeText = selectionSizeLabelOverride
+            }
         } else {
-            context.setStrokeColor(accentColor.cgColor)
-            context.setLineWidth(borderWidth)
-            context.setLineDash(phase: 0, lengths: dashPattern)
-            context.stroke(rect.insetBy(dx: -1, dy: -1))
-            context.setLineDash(phase: 0, lengths: [])
+            cutout = nil
         }
 
-        if state == .selected && selectionInteractionEnabled {
-            // Draw 8 control handles
-            drawHandles(context: context, rect: rect)
-            // Draw size label
-            SelectionView.drawSizeLabel(context: context, rect: rect)
-        } else if state == .selected, let selectionSizeLabelOverride {
-            SelectionView.drawSizeLabel(context: context, rect: rect, text: selectionSizeLabelOverride)
+        let path = CGMutablePath()
+        path.addRect(overlayCanvas.bounds)
+        if let cutout, cutout.width > 0, cutout.height > 0 {
+            path.addPath(CaptureSelectionChrome.path(for: cutout))
+        }
+        dimmingLayer.path = path
+
+        let selectionAccent = CaptureSelectionChrome.borderColor.cgColor
+        if let borderRect {
+            borderLayer.isHidden = false
+            if scrollCaptureActive {
+                let strokeWidth = borderWidth + 1
+                let outerInset = -(strokeWidth / 2 + 1)
+                borderLayer.strokeColor = NSColor.systemRed.cgColor
+                borderLayer.lineWidth = strokeWidth
+                borderLayer.lineDashPattern = nil
+                borderLayer.path = CaptureSelectionChrome.path(
+                    for: borderRect.insetBy(dx: outerInset, dy: outerInset)
+                )
+            } else {
+                borderLayer.strokeColor = selectionAccent
+                borderLayer.lineWidth = borderWidth
+                borderLayer.lineDashPattern = nil
+                borderLayer.path = CaptureSelectionChrome.path(
+                    for: borderRect.insetBy(dx: -1, dy: -1)
+                )
+            }
+        } else {
+            borderLayer.isHidden = true
+            borderLayer.path = nil
+        }
+
+        if showHandles, let rect = selectionRect {
+            let positions = SelectionView.handlePositions(for: rect)
+            for (index, handle) in handleLayers.enumerated() {
+                handle.isHidden = false
+                handle.backgroundColor = selectionAccent
+                handle.position = CGPoint(
+                    x: positions[index].x,
+                    y: positions[index].y
+                )
+            }
+        } else {
+            for handle in handleLayers {
+                handle.isHidden = true
+            }
+        }
+
+        if let badgeAnchor {
+            sizeBadge.text = badgeText ?? "\(Int(badgeAnchor.width)) x \(Int(badgeAnchor.height))"
+            sizeBadge.sizeToFit()
+            sizeBadge.frame.origin = NSPoint(
+                x: badgeAnchor.origin.x,
+                y: badgeAnchor.origin.y + badgeAnchor.height + 4
+            )
+            sizeBadge.isHidden = false
+        } else {
+            sizeBadge.isHidden = true
         }
     }
 
@@ -690,20 +805,6 @@ class SelectionView: NSView {
         firstFrameDisplayLink = nil
         onFirstFramePresented?()
         onFirstFramePresented = nil
-    }
-
-    private func drawHandles(context: CGContext, rect: NSRect) {
-        let positions = SelectionView.handlePositions(for: rect)
-        for pos in positions {
-            let handleRect = NSRect(
-                x: pos.x - handleSize / 2,
-                y: pos.y - handleSize / 2,
-                width: handleSize,
-                height: handleSize
-            )
-            context.setFillColor(accentColor.cgColor)
-            context.fillEllipse(in: handleRect)
-        }
     }
 
     static func drawSizeLabel(context: CGContext, rect: NSRect, text: String? = nil) {
@@ -1075,5 +1176,51 @@ class SelectionView: NSView {
             userInfo: nil
         )
         addTrackingArea(area)
+    }
+}
+
+/// Full-screen overlay helpers that must never steal clicks from `SelectionView`.
+private class OverlayPassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var isOpaque: Bool { false }
+}
+
+private final class SelectionOverlayCanvas: OverlayPassthroughView {}
+
+private final class SelectionSizeBadgeView: OverlayPassthroughView {
+    var text: String = "" {
+        didSet {
+            if oldValue != text {
+                needsDisplay = true
+            }
+        }
+    }
+
+    override var isHidden: Bool {
+        didSet {
+            if !isHidden {
+                needsDisplay = true
+            }
+        }
+    }
+
+    func sizeToFit() {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        ]
+        let size = text.size(withAttributes: attrs)
+        setFrameSize(NSSize(width: size.width + 8, height: size.height + 4))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3)
+        NSColor.black.withAlphaComponent(0.6).setFill()
+        bgPath.fill()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        ]
+        text.draw(at: NSPoint(x: 4, y: 2), withAttributes: attrs)
     }
 }

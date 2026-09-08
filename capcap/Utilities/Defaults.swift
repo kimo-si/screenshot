@@ -115,6 +115,14 @@ enum L10n {
     static var windowShadowToggleHint: String { s("windowShadowToggleHint") }
     static var windowShadowSizeLabel: String { s("windowShadowSizeLabel") }
     static var windowShadowSizeHint: String { s("windowShadowSizeHint") }
+    static var windowCornerRadiusLabel: String { s("windowCornerRadiusLabel") }
+    static var windowCornerRadiusHint: String { s("windowCornerRadiusHint") }
+    static var windowCornerRadiusUnit: String { s("windowCornerRadiusUnit") }
+    static var selectionBorderColorLabel: String { s("selectionBorderColorLabel") }
+    static var selectionBorderColorHint: String { s("selectionBorderColorHint") }
+    static var selectionBorderRedLabel: String { s("selectionBorderRedLabel") }
+    static var selectionBorderGreenLabel: String { s("selectionBorderGreenLabel") }
+    static var selectionBorderBlueLabel: String { s("selectionBorderBlueLabel") }
     static var savePathTitle: String { s("savePathTitle") }
     static var savePathSubtitle: String { s("savePathSubtitle") }
     static var askSaveLocationLabel: String { s("askSaveLocationLabel") }
@@ -207,6 +215,7 @@ enum L10n {
     static var magnifierLensPanelRgb: String { s("magnifierLensPanelRgb") }
     static var magnifierLensPanelCopyHint: String { s("magnifierLensPanelCopyHint") }
     static var magnifierLensPanelFormatHint: String { s("magnifierLensPanelFormatHint") }
+    static var magnifierLensPanelHistoryHint: String { s("magnifierLensPanelHistoryHint") }
     static var magnifierLensPanelAspectFree: String { s("magnifierLensPanelAspectFree") }
     static var magnifierLensPanelAspectHint: String { s("magnifierLensPanelAspectHint") }
     static func magnifierLensPanelRgbString(r: Int, g: Int, b: Int) -> String {
@@ -1862,6 +1871,10 @@ struct Defaults {
         min(1, max(0, value))
     }
 
+    private static func clampedByte(_ value: Int) -> Int {
+        min(255, max(0, value))
+    }
+
     private static func normalizedMagnifierLensPanelMagnifiedSize(_ value: Int) -> Int {
         switch value {
         case 96, 144, 192:
@@ -1871,9 +1884,10 @@ struct Defaults {
         }
     }
 
+    // 规范放大倍数，默认采用清晰可辨的九像素取色网格
     private static func normalizedMagnifierLensPanelMagnification(_ value: Double) -> Double {
-        guard value.isFinite else { return 4.0 }
-        return min(16.0, max(1.0, value))
+        guard value.isFinite else { return 22.0 }
+        return min(32.0, max(1.0, value))
     }
 
     static var lastBeautifyPresetID: String? {
@@ -2041,12 +2055,12 @@ struct Defaults {
 
     /// Magnification factor for the lens. Controls how many source pixels are
     /// sampled: source region = magnified display size / magnification.
-    /// Higher values = tighter zoom (smaller source region). Default 4×,
-    /// clamped to 1×...16× for hidden UserDefaults overrides.
+    /// Higher values = tighter zoom (smaller source region). Default 22×
+    /// (a 9-pixel grid), clamped to 1×...32× for hidden UserDefaults overrides.
     static var magnifierLensPanelMagnification: Double {
         get {
             if defaults.object(forKey: "magnifierLensPanelMagnification") == nil {
-                return 4.0
+                return 22.0
             }
             return normalizedMagnifierLensPanelMagnification(
                 defaults.double(forKey: "magnifierLensPanelMagnification")
@@ -2337,13 +2351,16 @@ struct Defaults {
         set { defaults.set(newValue, forKey: "pinAcrossSpaces") }
     }
 
-    // Window-capture drop shadow. When enabled, single-window screenshots get
-    // rounded corners and a macOS-style drop shadow in the final output.
-    // Rounded corners are always applied to window captures; this toggle only
-    // governs the shadow.
+    // Window-capture chrome. Screenshots (window click and free-drag) round
+    // their four corners by a user-chosen pixel radius, and window captures
+    // can optionally add a macOS-style drop shadow. The radius applies even
+    // when the shadow is off.
 
     static let windowShadowSizeMin: Double = 6
     static let windowShadowSizeMax: Double = 60
+    static let windowCornerRadiusMin: Double = 0
+    static let windowCornerRadiusMax: Double = 40
+    static let windowCornerRadiusDefault: Double = 16
 
     static var windowShadowEnabled: Bool {
         get {
@@ -2368,6 +2385,57 @@ struct Defaults {
         set {
             defaults.set(min(max(newValue, windowShadowSizeMin), windowShadowSizeMax), forKey: "windowShadowSize")
         }
+    }
+
+    static var windowCornerRadius: Double {
+        get {
+            if defaults.object(forKey: "windowCornerRadius") == nil {
+                return windowCornerRadiusDefault
+            }
+            let val = defaults.double(forKey: "windowCornerRadius")
+            return min(max(val.rounded(), windowCornerRadiusMin), windowCornerRadiusMax)
+        }
+        set {
+            defaults.set(
+                min(max(newValue.rounded(), windowCornerRadiusMin), windowCornerRadiusMax),
+                forKey: "windowCornerRadius"
+            )
+        }
+    }
+
+    /// Selection-overlay solid border, stored as 0–255 RGB, defaults to white.
+    static let selectionBorderRedDefault = 255
+    static let selectionBorderGreenDefault = 255
+    static let selectionBorderBlueDefault = 255
+
+    static var selectionBorderRed: Int {
+        get {
+            if defaults.object(forKey: "selectionBorderRed") == nil {
+                return selectionBorderRedDefault
+            }
+            return clampedByte(defaults.integer(forKey: "selectionBorderRed"))
+        }
+        set { defaults.set(clampedByte(newValue), forKey: "selectionBorderRed") }
+    }
+
+    static var selectionBorderGreen: Int {
+        get {
+            if defaults.object(forKey: "selectionBorderGreen") == nil {
+                return selectionBorderGreenDefault
+            }
+            return clampedByte(defaults.integer(forKey: "selectionBorderGreen"))
+        }
+        set { defaults.set(clampedByte(newValue), forKey: "selectionBorderGreen") }
+    }
+
+    static var selectionBorderBlue: Int {
+        get {
+            if defaults.object(forKey: "selectionBorderBlue") == nil {
+                return selectionBorderBlueDefault
+            }
+            return clampedByte(defaults.integer(forKey: "selectionBorderBlue"))
+        }
+        set { defaults.set(clampedByte(newValue), forKey: "selectionBorderBlue") }
     }
 
     static var language: AppLanguage {

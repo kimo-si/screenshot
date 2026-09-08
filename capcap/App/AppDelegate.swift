@@ -36,7 +36,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if appInitialized {
             flushPendingOpenImageURLs()
-        } else if LaunchAtLogin.isEnabled && AppPermissions.allRequiredGranted {
+        } else if LaunchAtLogin.isEnabled && AppPermissions.canLaunchApp {
+            initializeApp()
+            flushPendingOpenImageURLs()
+        } else if AppPermissions.skipPermissionGate {
             initializeApp()
             flushPendingOpenImageURLs()
         } else if !pendingOpenImageURLs.isEmpty {
@@ -796,6 +799,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             onSuspend: { [weak self] draft in
                 self?.handleEditSuspension(draft)
             },
+            onOpenHistoryLibrary: { [weak self] in
+                self?.handleHistoryPanelTrigger(holdOpenUntilMouseEnters: true)
+            },
             onComplete: { [weak self] finalImage in
                 self?.handleEditCompletion(finalImage)
             }
@@ -1061,6 +1067,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone") else {
             return
         }
+        NSApp.activate(ignoringOtherApps: true)
         NSWorkspace.shared.open(url)
     }
 

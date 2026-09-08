@@ -30,9 +30,17 @@
 "countdownHint" = "Удерживайте ⌥ Option, затем дважды нажмите ⌘ или сочетание для снимка, чтобы запустить обратный отсчёт перед захватом, Esc — отмена";
 "countdownSecondsSuffix" = "с";
 "windowShadowToggleLabel" = "Тень при снимке окна";
-"windowShadowToggleHint" = "Скругляет углы снимков окон и добавляет тень в стиле macOS";
+"windowShadowToggleHint" = "Добавляет тень в стиле macOS к снимкам окон";
 "windowShadowSizeLabel" = "Размер тени";
 "windowShadowSizeHint" = "Чем больше значение, тем мягче и шире тень — окно словно приподнято выше";
+"windowCornerRadiusLabel" = "Скругление углов";
+"windowCornerRadiusHint" = "Радиус скругления углов снимка окна и выделенной области, в px. Экспорт использует тот же радиус. 0 — прямые углы";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "Цвет рамки выделения";
+"selectionBorderColorHint" = "Цвет пунктирной рамки при выделении. RGB 0–255";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "Снимок экрана";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX: %@";
 "magnifierLensPanelRgb" = "RGB: %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "Копировать цвет(C)";
+"magnifierLensPanelCopyHint" = "Нажмите C, чтобы скопировать";
 "magnifierLensPanelFormatHint" = "Формат(F)";
+"magnifierLensPanelHistoryHint" = "Нажмите H, чтобы открыть историю";
 "magnifierLensPanelAspectFree" = "Свободно";
 "magnifierLensPanelAspectHint" = "Пропорц.(R)";
 /* Загрузка файлов */

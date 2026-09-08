@@ -2,11 +2,49 @@ import AppKit
 import CoreText
 
 private enum MagnifierLensPanelLayout {
-    static let panelWidth: CGFloat = 148
-    static let infoRowHeight: CGFloat = 18
-    static let infoGroupSpacing: CGFloat = 4
-    static let infoVerticalInset: CGFloat = 8
-    static let cornerRadius: CGFloat = 8
+    static let borderWidth: CGFloat = 1.5
+    static let innerWidth: CGFloat = 176
+    static let infoRowHeight: CGFloat = 23
+    static let infoVerticalInset: CGFloat = 10
+    static let cornerRadius: CGFloat = 10
+    static let reticleSize: CGFloat = 9
+    static let gridDivisionCount = 8
+    static let background = NSColor(srgbRed: 0.17, green: 0.18, blue: 0.20, alpha: 0.94)
+    static let gridColor = NSColor.white.withAlphaComponent(0.65)
+
+    static var accent: NSColor {
+        NSColor(srgbRed: 0, green: 0.80, blue: 1, alpha: 1)
+    }
+
+    static var panelWidth: CGFloat { innerWidth + borderWidth * 2 }
+
+    static var showHistoryHint: Bool {
+        Defaults.magnifierLensPanelShowFormatHint && Defaults.isHistoryCacheAvailable
+    }
+
+    static var infoRowCount: Int {
+        2
+            + (Defaults.magnifierLensPanelShowCopyHint ? 1 : 0)
+            + (showHistoryHint ? 1 : 0)
+    }
+
+    static var infoHeight: CGFloat {
+        CGFloat(infoRowCount) * infoRowHeight + infoVerticalInset * 2
+    }
+
+    static var panelSize: NSSize {
+        NSSize(
+            width: ceil(panelWidth),
+            height: ceil(borderWidth * 2 + innerWidth + infoHeight)
+        )
+    }
+
+    /// Odd source-pixel count so one pixel sits under the crosshair.
+    static func sourcePixelCount(innerWidth: CGFloat) -> Int {
+        let raw = Int((innerWidth / CGFloat(Defaults.magnifierLensPanelMagnification)).rounded())
+        let odd = raw.isMultiple(of: 2) ? raw + 1 : raw
+        return min(21, max(5, odd))
+    }
 }
 
 /// Cursor-adjacent magnifier color picker shown on the overlay's idle state.
@@ -33,23 +71,25 @@ final class MagnifierLensPanelWindow: NSPanel {
 
     private static let edgeMargin: CGFloat = 8
 
-    /// Computes the panel size that fits the full-width square magnifier plus
-    /// 5 info rows, or 3 rows when optional hints are disabled.
+    /// Computes the panel size that fits the square magnifier plus coordinate,
+    /// color, and optional shortcut-hint rows.
     private static func computePanelSize() -> NSSize {
-        let infoRows = 3
-            + (Defaults.magnifierLensPanelShowCopyHint ? 1 : 0)
-            + (Defaults.magnifierLensPanelShowFormatHint ? 1 : 0)
-        let infoHeight = CGFloat(infoRows) * MagnifierLensPanelLayout.infoRowHeight
-            + MagnifierLensPanelLayout.infoGroupSpacing
-            + MagnifierLensPanelLayout.infoVerticalInset * 2
-        let width = MagnifierLensPanelLayout.panelWidth
-        let height = width + infoHeight
-        return NSSize(width: ceil(width), height: ceil(height))
+        MagnifierLensPanelLayout.panelSize
     }
 
     private let lensView: MagnifierLensPanelView
     private var mouseMonitor: Any?
     private let panelSize: NSSize
+    private var pendingSnapshot: CGImage?
+    private var pendingScreenFrame: NSRect = .zero
+    private var pendingMouseLocation: NSPoint = .zero
+    private var pendingFormat: Format = .hex
+    private var hasPendingContent = false
+    private var contentDisplayLink: CADisplayLink?
+    private var lastAppliedPixelPoint: CGPoint?
+    private var lastAppliedSample: Sample?
+    private var lastAppliedFormat: Format?
+    private var lastPanelOrigin: NSPoint?
 
     init() {
         let size = Self.computePanelSize()
@@ -74,16 +114,20 @@ final class MagnifierLensPanelWindow: NSPanel {
 
     deinit {
         stopTracking()
+        stopContentDisplayLink()
     }
 
     func show() {
         orderFrontRegardless()
-        updatePosition()
         startTracking()
+        startContentDisplayLink()
+        hasPendingContent = true
+        pendingMouseLocation = NSEvent.mouseLocation
     }
 
     func dismiss() {
         stopTracking()
+        stopContentDisplayLink()
         orderOut(nil)
     }
 
@@ -93,29 +137,18 @@ final class MagnifierLensPanelWindow: NSPanel {
         mouseLocation: NSPoint,
         format: Format
     ) {
-        guard let snapshot else {
-            lensView.clear()
-            return
-        }
-        let pixelPoint = MagnifierLensPanelSampler.pixelCoordinate(
-            globalPoint: mouseLocation,
-            screenFrame: screenFrame,
-            snapshotSize: CGSize(width: snapshot.width, height: snapshot.height)
-        )
-        let sample = MagnifierLensPanelSampler.sample(image: snapshot, at: pixelPoint)
-            ?? Sample(r: 0, g: 0, b: 0)
-        lensView.update(
-            sample: sample,
-            pixelPoint: pixelPoint,
-            mouseLocation: mouseLocation,
-            snapshot: snapshot,
-            screenFrame: screenFrame,
-            format: format
-        )
-        updatePosition()
+        pendingSnapshot = snapshot
+        pendingScreenFrame = screenFrame
+        pendingMouseLocation = mouseLocation
+        pendingFormat = format
+        hasPendingContent = true
+        startContentDisplayLink()
     }
 
     func setFormat(_ format: Format) {
+        pendingFormat = format
+        hasPendingContent = true
+        startContentDisplayLink()
         lensView.format = format
     }
 
@@ -133,7 +166,10 @@ final class MagnifierLensPanelWindow: NSPanel {
     private func startTracking() {
         guard mouseMonitor == nil else { return }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
-            self?.updatePosition()
+            guard let self else { return event }
+            self.pendingMouseLocation = NSEvent.mouseLocation
+            self.hasPendingContent = true
+            self.startContentDisplayLink()
             return event
         }
     }
@@ -145,8 +181,65 @@ final class MagnifierLensPanelWindow: NSPanel {
         }
     }
 
-    private func updatePosition() {
-        let loc = NSEvent.mouseLocation
+    private func startContentDisplayLink() {
+        guard contentDisplayLink == nil else { return }
+        let link = lensView.displayLink(
+            target: self,
+            selector: #selector(applyPendingContent)
+        )
+        contentDisplayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    private func stopContentDisplayLink() {
+        contentDisplayLink?.invalidate()
+        contentDisplayLink = nil
+        hasPendingContent = false
+    }
+
+    @objc private func applyPendingContent() {
+        guard hasPendingContent else { return }
+        hasPendingContent = false
+        applyQueuedContent()
+        updatePosition(mouseLocation: pendingMouseLocation)
+    }
+
+    private func applyQueuedContent() {
+        guard let snapshot = pendingSnapshot else {
+            if lastAppliedSample != nil {
+                lensView.clear()
+                lastAppliedSample = nil
+                lastAppliedPixelPoint = nil
+            }
+            return
+        }
+        let pixelPoint = MagnifierLensPanelSampler.pixelCoordinate(
+            globalPoint: pendingMouseLocation,
+            screenFrame: pendingScreenFrame,
+            snapshotSize: CGSize(width: snapshot.width, height: snapshot.height)
+        )
+        let sample = MagnifierLensPanelSampler.sample(image: snapshot, at: pixelPoint)
+            ?? Sample(r: 0, g: 0, b: 0)
+        guard lastAppliedPixelPoint != pixelPoint
+                || lastAppliedSample != sample
+                || lastAppliedFormat != pendingFormat else {
+            return
+        }
+        lastAppliedPixelPoint = pixelPoint
+        lastAppliedSample = sample
+        lastAppliedFormat = pendingFormat
+        lensView.update(
+            sample: sample,
+            pixelPoint: pixelPoint,
+            mouseLocation: pendingMouseLocation,
+            snapshot: snapshot,
+            screenFrame: pendingScreenFrame,
+            format: pendingFormat
+        )
+    }
+
+    private func updatePosition(mouseLocation loc: NSPoint? = nil) {
+        let loc = loc ?? NSEvent.mouseLocation
         let offsetX = CGFloat(Defaults.magnifierLensPanelOffsetX)
         let offsetY = CGFloat(Defaults.magnifierLensPanelOffsetY)
         // Default: panel sits directly below the cursor. AppKit panel origin
@@ -170,7 +263,10 @@ final class MagnifierLensPanelWindow: NSPanel {
                 origin.y = loc.y + offsetY
             }
         }
-        setFrameOrigin(origin)
+        if lastPanelOrigin != origin {
+            lastPanelOrigin = origin
+            setFrameOrigin(origin)
+        }
     }
 }
 
@@ -208,6 +304,10 @@ enum MagnifierLensPanelSampler {
               point.y < CGFloat(image.height) else {
             return nil
         }
+        let pixelX = Int(point.x)
+        let pixelY = Int(point.y)
+        let cropRect = CGRect(x: pixelX, y: pixelY, width: 1, height: 1)
+        let sampledImage = image.cropping(to: cropRect) ?? image
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
         let bytesPerPixel = 4
@@ -226,17 +326,20 @@ enum MagnifierLensPanelSampler {
             return nil
         }
 
-        // Position the target pixel so it exactly covers the 1×1 output
-        // context. `interpolationQuality = .none` avoids edge rows blending
-        // with adjacent or transparent pixels.
         context.interpolationQuality = .none
-        let drawRect = CGRect(
-            x: -point.x,
-            y: 1 + point.y - CGFloat(image.height),
-            width: CGFloat(image.width),
-            height: CGFloat(image.height)
-        )
-        context.draw(image, in: drawRect)
+        if sampledImage === image {
+            // Fallback for bitmaps that refuse a 1×1 crop: position the
+            // target pixel onto the 1×1 context without resampling neighbors.
+            let drawRect = CGRect(
+                x: -point.x,
+                y: 1 + point.y - CGFloat(image.height),
+                width: CGFloat(image.width),
+                height: CGFloat(image.height)
+            )
+            context.draw(image, in: drawRect)
+        } else {
+            context.draw(sampledImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
 
         return MagnifierLensPanelWindow.Sample(
             r: Int(pixelData[0]),
@@ -285,27 +388,15 @@ final class MagnifierLensPanelView: NSView {
     private(set) var currentPixelPoint: CGPoint = .zero
     private var mouseLocation: NSPoint = .zero
     private var snapshot: CGImage?
-    private var screenFrame: NSRect = .zero
 
     // Layout
     private let infoLeftPadding: CGFloat = 10
     private let infoRightPadding: CGFloat = 10
     private let infoColumnGap: CGFloat = 6
-    private let colorSwatchGap: CGFloat = 6
 
-    private static let labelFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private static let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-    private static let tipFont = NSFont.systemFont(ofSize: 10.5, weight: .regular)
-    /// Fixed slot sized from the widest valid `#RRGGBB` candidate so the HEX
-    /// value stays aligned while sampled characters change.
-    private static let hexValueSlotWidth: CGFloat = {
-        let attrs: [NSAttributedString.Key: Any] = [.font: valueFont]
-        return "0123456789ABCDEF".reduce(CGFloat.zero) { widest, character in
-            let candidate = "#" + String(repeating: String(character), count: 6)
-            let width = (candidate as NSString).size(withAttributes: attrs).width
-            return max(widest, width)
-        }.rounded(.up)
-    }()
+    private static let labelFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    private static let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+    private static let tipFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
     func clear() {
         currentSample = nil
@@ -318,169 +409,215 @@ final class MagnifierLensPanelView: NSView {
         pixelPoint: CGPoint,
         mouseLocation: NSPoint,
         snapshot: CGImage,
-        screenFrame: NSRect,
+        screenFrame _: NSRect,
         format: MagnifierLensPanelWindow.Format
     ) {
         self.currentSample = sample
         self.currentPixelPoint = pixelPoint
         self.mouseLocation = mouseLocation
         self.snapshot = snapshot
-        self.screenFrame = screenFrame
         self.format = format
         needsDisplay = true
     }
 
+    // 绘制统一的深色浮层背景、放大区域和青色外框
     override func draw(_ dirtyRect: NSRect) {
-        let panelWidth = bounds.width
-        let panelHeight = bounds.height
-        let magnifiedRect = NSRect(
-            x: 0,
-            y: panelHeight - panelWidth,
-            width: panelWidth,
-            height: panelWidth
-        )
-
-        // Panel background — pick dark or light based on appearance + setting.
+        let border = MagnifierLensPanelLayout.borderWidth
+        let hudRect = bounds.insetBy(dx: border / 2, dy: border / 2)
+        let inner = hudRect.insetBy(dx: border / 2, dy: border / 2)
         let bgPath = NSBezierPath(
-            roundedRect: bounds,
+            roundedRect: hudRect,
             xRadius: MagnifierLensPanelLayout.cornerRadius,
             yRadius: MagnifierLensPanelLayout.cornerRadius
         )
-        let panelBackground = MagnifierLensPanelSampler.backgroundColor(forAppearance: effectiveAppearance)
-        panelBackground.setFill()
+        MagnifierLensPanelLayout.background.setFill()
         bgPath.fill()
-
         NSGraphicsContext.current?.saveGraphicsState()
         bgPath.addClip()
-        drawMagnifiedArea(in: magnifiedRect)
-        drawInfo()
+        // 在圆角裁剪范围内绘制图像和信息，防止边角内容溢出
+        drawContent(in: inner)
         NSGraphicsContext.current?.restoreGraphicsState()
+        MagnifierLensPanelLayout.accent.setStroke()
+        bgPath.lineWidth = border
+        bgPath.lineJoinStyle = .round
+        bgPath.stroke()
+    }
+
+    // 将正方形放大区域和下方信息区拼接为连续面板
+    private func drawContent(in inner: NSRect) {
+        let magnifiedRect = NSRect(
+            x: inner.minX, y: inner.maxY - inner.width,
+            width: inner.width, height: inner.width
+        )
+        drawMagnifiedArea(in: magnifiedRect)
+        drawDivider(at: magnifiedRect.minY, in: inner)
+        drawInfo(in: NSRect(
+            x: inner.minX,
+            y: inner.minY,
+            width: inner.width,
+            height: magnifiedRect.minY - inner.minY
+        ))
+    }
+
+    // 用与外框相同的青色线分隔放大区域和信息区
+    private func drawDivider(at y: CGFloat, in inner: NSRect) {
+        MagnifierLensPanelLayout.accent.setStroke()
+        let line = NSBezierPath()
+        line.lineWidth = MagnifierLensPanelLayout.borderWidth
+        line.move(to: NSPoint(x: inner.minX, y: y))
+        line.line(to: NSPoint(x: inner.maxX, y: y))
+        line.stroke()
     }
 
     private func drawMagnifiedArea(in rect: NSRect) {
-        // Fill the entire area with a visually distinct out-of-bounds
-        // colour so the user can tell which region sits beyond the
-        // screen boundary. The valid crop is drawn on top afterwards.
-        NSColor(calibratedWhite: 0.15, alpha: 0.6).setFill()
+        NSColor(calibratedWhite: 0.12, alpha: 0.55).setFill()
         NSBezierPath(rect: rect).fill()
 
-        guard let snapshot else { return }
+        guard let snapshot else {
+            drawGridAndReticle(in: rect)
+            return
+        }
 
-        // Source region (in pixels) = display size / zoom factor.
-        let regionSize = max(2, rect.width / CGFloat(Defaults.magnifierLensPanelMagnification))
-        let sourceX = max(0, currentPixelPoint.x - regionSize / 2)
-        let sourceY = max(0, currentPixelPoint.y - regionSize / 2)
-        let clampedWidth = min(regionSize, CGFloat(snapshot.width) - sourceX)
-        let clampedHeight = min(regionSize, CGFloat(snapshot.height) - sourceY)
+        let pixelCount = MagnifierLensPanelLayout.sourcePixelCount(innerWidth: rect.width)
+        let cell = rect.width / CGFloat(pixelCount)
+        let half = CGFloat(pixelCount / 2)
+        let desiredX = currentPixelPoint.x - half
+        let desiredY = currentPixelPoint.y - half
+        let sourceX = max(0, desiredX)
+        let sourceY = max(0, desiredY)
+        let clampedWidth = min(CGFloat(pixelCount), CGFloat(snapshot.width) - sourceX)
+        let clampedHeight = min(CGFloat(pixelCount), CGFloat(snapshot.height) - sourceY)
 
-        guard clampedWidth > 0, clampedHeight > 0,
-              let cropped = snapshot.cropping(to: CGRect(
-                x: sourceX, y: sourceY, width: clampedWidth, height: clampedHeight
-              )),
-              let context = NSGraphicsContext.current?.cgContext else { return }
+        if clampedWidth > 0, clampedHeight > 0,
+           let cropped = snapshot.cropping(to: CGRect(
+            x: sourceX, y: sourceY, width: clampedWidth, height: clampedHeight
+           )),
+           let context = NSGraphicsContext.current?.cgContext {
+            let missingLeft = sourceX - desiredX
+            let cursorOffsetY = currentPixelPoint.y - sourceY
+            let drawMaxY = rect.midY + (cursorOffsetY + 0.5) * cell
+            let drawRect = NSRect(
+                x: rect.minX + missingLeft * cell,
+                y: drawMaxY - clampedHeight * cell,
+                width: clampedWidth * cell,
+                height: clampedHeight * cell
+            )
 
-        // Compute where the valid crop should sit inside the display
-        // rect so the out-of-bounds portion stays visible as the dimmed
-        // background fill. The cursor pixel must land at rect.mid.
-        // CGContext maps CGImage y=0 to drawRect.maxY (AppKit y-up),
-        // so the cursor (at crop-y cursorOffsetY) sits at
-        // drawRect.maxY - cursorOffsetY * scale == rect.midY.
-        let scale = rect.width / regionSize
-        let missingLeft = sourceX - (currentPixelPoint.x - regionSize / 2)  // ≥ 0
-        let cursorOffsetY = currentPixelPoint.y - sourceY  // in crop (y-down)
-        let drawMaxY = rect.midY + cursorOffsetY * scale
-        let drawRect = NSRect(
-            x: rect.minX + missingLeft * scale,
-            y: drawMaxY - clampedHeight * scale,
-            width: clampedWidth * scale,
-            height: clampedHeight * scale
-        )
+            context.saveGState()
+            context.clip(to: rect)
+            context.interpolationQuality = .none
+            context.draw(cropped, in: drawRect)
+            context.restoreGState()
+        }
 
-        context.saveGState()
-        context.clip(to: rect)
-        context.interpolationQuality = .none
-        context.draw(cropped, in: drawRect)
-        context.restoreGState()
-
-        // Thin app-accent crosshair spanning the full magnified area.
-        let centerX = rect.midX
-        let centerY = rect.midY
-        accentGreen.setStroke()
-        let bigCross = NSBezierPath()
-        bigCross.lineWidth = 2
-        bigCross.move(to: NSPoint(x: rect.minX, y: centerY))
-        bigCross.line(to: NSPoint(x: rect.maxX, y: centerY))
-        bigCross.move(to: NSPoint(x: centerX, y: rect.minY))
-        bigCross.line(to: NSPoint(x: centerX, y: rect.maxY))
-        bigCross.stroke()
+        drawGridAndReticle(in: rect)
     }
 
-    private func drawInfo() {
+    // 分层绘制像素网格、定位轴和中心取色框
+    private func drawGridAndReticle(in rect: NSRect) {
+        drawGuideGrid(in: rect)
+        drawCrosshair(in: rect)
+        drawSampleReticle(in: rect)
+    }
+
+    // 固定八等分辅助网格，中央分隔线由青色十字线单独绘制
+    private func drawGuideGrid(in rect: NSRect) {
+        let divisions = MagnifierLensPanelLayout.gridDivisionCount
+        let cell = rect.width / CGFloat(divisions)
+        MagnifierLensPanelLayout.gridColor.setStroke()
+        let grid = NSBezierPath()
+        grid.lineWidth = 1
+        for i in 1..<divisions where i != divisions / 2 {
+            let offset = CGFloat(i) * cell
+            grid.move(to: NSPoint(x: rect.minX + offset, y: rect.minY))
+            grid.line(to: NSPoint(x: rect.minX + offset, y: rect.maxY))
+            grid.move(to: NSPoint(x: rect.minX, y: rect.minY + offset))
+            grid.line(to: NSPoint(x: rect.maxX, y: rect.minY + offset))
+        }
+        grid.stroke()
+    }
+
+    // 绘制贯穿放大区域中心的青色十字定位线
+    private func drawCrosshair(in rect: NSRect) {
+        MagnifierLensPanelLayout.accent.setStroke()
+        let cross = NSBezierPath()
+        cross.lineWidth = MagnifierLensPanelLayout.borderWidth
+        cross.move(to: NSPoint(x: rect.minX, y: rect.midY))
+        cross.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+        cross.move(to: NSPoint(x: rect.midX, y: rect.minY))
+        cross.line(to: NSPoint(x: rect.midX, y: rect.maxY))
+        cross.stroke()
+    }
+
+    // 用当前像素填充中心小方框，避免十字线遮挡真实色值
+    private func drawSampleReticle(in rect: NSRect) {
+        let side = MagnifierLensPanelLayout.reticleSize
+        let centerRect = NSRect(
+            x: rect.midX - side / 2, y: rect.midY - side / 2,
+            width: side, height: side
+        )
+        let sample = currentSample ?? .init(r: 43, g: 46, b: 51)
+        NSColor(srgbRed: CGFloat(sample.r) / 255, green: CGFloat(sample.g) / 255,
+                blue: CGFloat(sample.b) / 255, alpha: 1).setFill()
+        let reticle = NSBezierPath(roundedRect: centerRect, xRadius: 1.5, yRadius: 1.5)
+        reticle.fill()
+        NSColor.white.setStroke()
+        reticle.lineWidth = 1.5
+        reticle.stroke()
+    }
+
+    // 依次绘制坐标、色值和已启用的快捷操作提示
+    private func drawInfo(in area: NSRect) {
         let labelParagraphStyle = NSMutableParagraphStyle()
         labelParagraphStyle.lineBreakMode = .byTruncatingTail
         let valueParagraphStyle = NSMutableParagraphStyle()
         valueParagraphStyle.alignment = .right
         valueParagraphStyle.lineBreakMode = .byTruncatingHead
 
+        let primaryText = NSColor.white
         let labelAttrs: [NSAttributedString.Key: Any] = [
             .font: Self.labelFont,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: primaryText,
             .paragraphStyle: labelParagraphStyle,
         ]
         let valueAttrs: [NSAttributedString.Key: Any] = [
             .font: Self.valueFont,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: primaryText,
             .paragraphStyle: valueParagraphStyle,
         ]
         let tipAttrs: [NSAttributedString.Key: Any] = [
             .font: Self.tipFont,
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.7)
+            .foregroundColor: primaryText.withAlphaComponent(0.92),
         ]
 
-        // Compute the row index (from the bottom) for each row that exists.
-        // We always render coords + color (rows 3 and 2 in old layout).
-        // Tip rows occupy 1 and 0 conditionally.
-        var rowFromBottom = 0
-        // totalRows in info area (coords + color + ratio + optional shortcut hints)
-        let totalRows = 3
-            + (Defaults.magnifierLensPanelShowCopyHint ? 1 : 0)
-            + (Defaults.magnifierLensPanelShowFormatHint ? 1 : 0)
-
-        func rowY(forIndex i: Int) -> CGFloat {
-            // i is 0-based from bottom
-            let baseY = MagnifierLensPanelLayout.infoVerticalInset
-                + CGFloat(i) * MagnifierLensPanelLayout.infoRowHeight
-            let firstInfoItemRow = totalRows - 2
-            return baseY + (i >= firstInfoItemRow
-                ? MagnifierLensPanelLayout.infoGroupSpacing
-                : 0)
+        // 从信息区顶部计算固定行高，确保动态内容不会改变布局
+        func rowY(forIndexFromTop i: Int) -> CGFloat {
+            area.maxY
+                - MagnifierLensPanelLayout.infoVerticalInset
+                - CGFloat(i + 1) * MagnifierLensPanelLayout.infoRowHeight
         }
 
-        // Coordinates row (always)
+        var nextRow = 0
         if currentSample != nil {
             let coordsValue: String
             switch Defaults.magnifierLensPanelCoordinateMode {
             case .points:
-                let x = String(Int(mouseLocation.x))
-                let y = String(Int(mouseLocation.y))
-                coordsValue = "\(x), \(y)"
+                coordsValue = "\(Int(mouseLocation.x)), \(Int(mouseLocation.y))"
             case .pixels:
-                let x = String(Int(currentPixelPoint.x))
-                let y = String(Int(currentPixelPoint.y))
-                coordsValue = "\(x), \(y)"
+                coordsValue = "\(Int(currentPixelPoint.x)), \(Int(currentPixelPoint.y))"
             }
             drawInfoRow(
                 label: L10n.magnifierLensPanelCoordinatesLabel,
                 value: coordsValue,
                 labelAttrs: labelAttrs,
                 valueAttrs: valueAttrs,
-                at: rowY(forIndex: totalRows - 1)
+                in: area,
+                at: rowY(forIndexFromTop: nextRow)
             )
+            nextRow += 1
         }
 
-        // HEX/RGB row (always)
         if let sample = currentSample {
-            let rowIndex = totalRows - 2
             let colorValue: String
             switch format {
             case .hex:
@@ -488,66 +625,58 @@ final class MagnifierLensPanelView: NSView {
             case .rgb:
                 colorValue = "\(sample.r), \(sample.g), \(sample.b)"
             }
-            drawColorInfoRow(
+            drawInfoRow(
                 label: L10n.magnifierLensPanelColorValueLabel,
                 value: colorValue,
-                sample: sample,
                 labelAttrs: labelAttrs,
                 valueAttrs: valueAttrs,
-                at: rowY(forIndex: rowIndex)
+                in: area,
+                at: rowY(forIndexFromTop: nextRow)
             )
+            nextRow += 1
         }
 
-        drawHintRow(
-            label: L10n.magnifierLensPanelAspectHint,
-            value: aspectHintValue(),
-            attrs: tipAttrs,
-            at: rowY(forIndex: totalRows - 3)
-        )
-
-        // Tip rows (conditional)
         if Defaults.magnifierLensPanelShowCopyHint {
             drawHintRow(
                 label: L10n.magnifierLensPanelCopyHint,
                 value: nil,
                 attrs: tipAttrs,
-                at: rowY(forIndex: rowFromBottom)
+                in: area,
+                at: rowY(forIndexFromTop: nextRow)
             )
-            rowFromBottom += 1
+            nextRow += 1
         }
-        if Defaults.magnifierLensPanelShowFormatHint {
-            let colorFormat: String
-            switch format {
-            case .hex: colorFormat = "HEX"
-            case .rgb: colorFormat = "RGB"
-            }
+        if MagnifierLensPanelLayout.showHistoryHint {
             drawHintRow(
-                label: L10n.magnifierLensPanelFormatHint,
-                value: colorFormat,
+                label: L10n.magnifierLensPanelHistoryHint,
+                value: nil,
                 attrs: tipAttrs,
-                at: rowY(forIndex: rowFromBottom)
+                in: area,
+                at: rowY(forIndexFromTop: nextRow)
             )
         }
     }
 
+    // 为坐标和颜色共用双列布局，给完整 RGB 数值预留可用空间
     private func drawInfoRow(
         label: String,
         value: String,
         labelAttrs: [NSAttributedString.Key: Any],
         valueAttrs: [NSAttributedString.Key: Any],
+        in area: NSRect,
         at y: CGFloat
     ) {
-        let valueRightEdge = bounds.width - infoRightPadding
+        let valueRightEdge = area.maxX - infoRightPadding
         let availableColumnWidth = max(
             0,
-            valueRightEdge - infoLeftPadding - infoColumnGap
+            valueRightEdge - (area.minX + infoLeftPadding) - infoColumnGap
         )
         let measuredLabelWidth = ceil((label as NSString).size(withAttributes: labelAttrs).width)
         let labelWidth = min(measuredLabelWidth, floor(availableColumnWidth * 0.44))
-        let valueX = infoLeftPadding + labelWidth + infoColumnGap
+        let valueX = area.minX + infoLeftPadding + labelWidth + infoColumnGap
         let valueWidth = max(0, valueRightEdge - valueX)
         let labelRect = NSRect(
-            x: infoLeftPadding,
+            x: area.minX + infoLeftPadding,
             y: y,
             width: labelWidth,
             height: MagnifierLensPanelLayout.infoRowHeight
@@ -556,58 +685,6 @@ final class MagnifierLensPanelView: NSView {
             x: valueX,
             y: y,
             width: valueWidth,
-            height: MagnifierLensPanelLayout.infoRowHeight
-        )
-        (label as NSString).draw(in: labelRect, withAttributes: labelAttrs)
-        (value as NSString).draw(in: valueRect, withAttributes: valueAttrs)
-    }
-
-    private func drawColorInfoRow(
-        label: String,
-        value: String,
-        sample: MagnifierLensPanelWindow.Sample,
-        labelAttrs: [NSAttributedString.Key: Any],
-        valueAttrs: [NSAttributedString.Key: Any],
-        at y: CGFloat
-    ) {
-        let valueRect = NSRect(
-            x: bounds.width - infoRightPadding - Self.hexValueSlotWidth,
-            y: y,
-            width: Self.hexValueSlotWidth,
-            height: MagnifierLensPanelLayout.infoRowHeight
-        )
-        let sourceLabelLine = CTLineCreateWithAttributedString(
-            NSAttributedString(string: label, attributes: labelAttrs)
-        )
-        let sourceLabelInkBounds = CTLineGetBoundsWithOptions(
-            sourceLabelLine,
-            [.useGlyphPathBounds]
-        )
-        let swatchSide = min(
-            MagnifierLensPanelLayout.infoRowHeight,
-            max(8, floor(sourceLabelInkBounds.height))
-        )
-        let measuredLabelWidth = ceil(CGFloat(CTLineGetTypographicBounds(
-            sourceLabelLine,
-            nil,
-            nil,
-            nil
-        )))
-        let labelWidth = min(
-            measuredLabelWidth,
-            max(
-                0,
-                valueRect.minX
-                    - infoColumnGap
-                    - swatchSide
-                    - colorSwatchGap
-                    - infoLeftPadding
-            )
-        )
-        let labelRect = NSRect(
-            x: infoLeftPadding,
-            y: y,
-            width: labelWidth,
             height: MagnifierLensPanelLayout.infoRowHeight
         )
         let labelLine = coreTextLine(
@@ -622,27 +699,8 @@ final class MagnifierLensPanelView: NSView {
             fitting: valueRect.width,
             truncation: .start
         )
-        let swatchRect = NSRect(
-            x: labelRect.maxX + colorSwatchGap,
-            y: labelRect.midY - swatchSide / 2,
-            width: swatchSide,
-            height: swatchSide
-        )
         drawCoreTextLine(labelLine, inkCenteredIn: labelRect, rightAligned: false)
         drawCoreTextLine(valueLine, inkCenteredIn: valueRect, rightAligned: true)
-
-        let swatchColor = NSColor(
-            srgbRed: CGFloat(sample.r) / 255.0,
-            green: CGFloat(sample.g) / 255.0,
-            blue: CGFloat(sample.b) / 255.0,
-            alpha: 1
-        )
-        let swatchPath = NSBezierPath(roundedRect: swatchRect, xRadius: 3, yRadius: 3)
-        swatchColor.setFill()
-        swatchPath.fill()
-        NSColor.labelColor.withAlphaComponent(0.35).setStroke()
-        swatchPath.lineWidth = 0.5
-        swatchPath.stroke()
     }
 
     private func coreTextLine(
@@ -704,12 +762,13 @@ final class MagnifierLensPanelView: NSView {
         label: String,
         value: String?,
         attrs: [NSAttributedString.Key: Any],
+        in area: NSRect,
         at y: CGFloat
     ) {
         let rowRect = NSRect(
-            x: infoLeftPadding,
+            x: area.minX + infoLeftPadding,
             y: y,
-            width: bounds.width - infoLeftPadding - infoRightPadding,
+            width: area.width - infoLeftPadding - infoRightPadding,
             height: MagnifierLensPanelLayout.infoRowHeight
         )
         var labelRect = rowRect
@@ -757,28 +816,5 @@ final class MagnifierLensPanelView: NSView {
 
     private func hexString(_ sample: MagnifierLensPanelWindow.Sample) -> String {
         String(format: "#%02X%02X%02X", sample.r, sample.g, sample.b)
-    }
-
-    private func aspectHintValue() -> String {
-        if Defaults.hasSelectionAspectRatio {
-            return aspectRatioLabel(for: CGFloat(Defaults.selectionAspectRatio))
-        }
-        return L10n.magnifierLensPanelAspectFree
-    }
-
-    private func aspectRatioLabel(for aspectRatio: CGFloat) -> String {
-        let presets: [(CGFloat, String)] = [
-            (1.0, "1:1"),
-            (2.35, "2.35:1"),
-            (3.0, "3:1"),
-            (3.0 / 2.0, "3:2"),
-            (4.0 / 3.0, "4:3"),
-            (9.0 / 16.0, "9:16"),
-            (16.0 / 9.0, "16:9"),
-        ]
-        if let preset = presets.first(where: { abs($0.0 - aspectRatio) < 0.000_001 }) {
-            return preset.1
-        }
-        return String(format: "%.2f:1", Double(aspectRatio))
     }
 }

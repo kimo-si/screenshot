@@ -5,19 +5,36 @@ import AppKit
 @MainActor
 final class SettingsNavigator {
     private let bundleIdentifier = "com.apple.systempreferences"
-    private let applicationURL = URL(fileURLWithPath: "/System/Applications/System Settings.app")
 
     /// Opens System Settings with a generic deeplink URL.
+    ///
+    /// Menu-bar (`LSUIElement`) hosts are not the frontmost app, so launching
+    /// System Settings.app first and then sending the deeplink often drops the
+    /// URL. Activate ourselves, open the deeplink directly, and fall back to
+    /// `/usr/bin/open` if AppKit refuses the URL.
     @discardableResult
     func openSettings(at url: URL) -> Bool {
-        NSWorkspace.shared.openApplication(
-            at: applicationURL,
-            configuration: NSWorkspace.OpenConfiguration()
-        ) { _, _ in }
+        NSApp.activate(ignoringOtherApps: true)
 
-        let didOpen = NSWorkspace.shared.open(url)
+        var didOpen = NSWorkspace.shared.open(url)
+        if !didOpen {
+            didOpen = openWithLaunchServices(url)
+        }
         activateSettings()
         return didOpen
+    }
+
+    private func openWithLaunchServices(_ url: URL) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [url.absoluteString]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     /// Re-activates the running System Settings process if it already exists.

@@ -30,9 +30,17 @@
 "countdownHint" = "⌥ Option を押しながら ⌘ をダブルタップするか、スクリーンショットのショートカットを押すと、撮影前にカウントダウンが始まります。Esc でキャンセル";
 "countdownSecondsSuffix" = "秒";
 "windowShadowToggleLabel" = "ウインドウ撮影の影";
-"windowShadowToggleHint" = "ウインドウを選んで撮影すると角を丸め、macOS 風のドロップシャドウを追加します";
+"windowShadowToggleHint" = "ウインドウを選んで撮影すると macOS 風のドロップシャドウを追加します";
 "windowShadowSizeLabel" = "影のサイズ";
 "windowShadowSizeHint" = "値を大きくするほど影が柔らかく広がり、ウインドウが高く浮いて見えます";
+"windowCornerRadiusLabel" = "角丸";
+"windowCornerRadiusHint" = "ウインドウ撮影と範囲選択の四隅の角丸半径（px）。書き出し画像も同じ半径で切り抜きます。0 で直角";
+"windowCornerRadiusUnit" = "px";
+"selectionBorderColorLabel" = "選択枠の色";
+"selectionBorderColorHint" = "スクリーンショット選択時の破線枠の色。RGB は 0–255";
+"selectionBorderRedLabel" = "R";
+"selectionBorderGreenLabel" = "G";
+"selectionBorderBlueLabel" = "B";
 
 /* Screenshot shortcut */
 "shortcutHeader" = "スクリーンショット";
@@ -659,8 +667,9 @@
 "magnifierLensPanelHex" = "HEX: %@";
 "magnifierLensPanelRgb" = "RGB: %@";
 "magnifierLensPanelRgbString" = "rgb(%d, %d, %d)";
-"magnifierLensPanelCopyHint" = "色をコピー(C)";
+"magnifierLensPanelCopyHint" = "C で色をコピー";
 "magnifierLensPanelFormatHint" = "カラー形式(F)";
+"magnifierLensPanelHistoryHint" = "H で履歴を開く";
 "magnifierLensPanelAspectFree" = "自由";
 "magnifierLensPanelAspectHint" = "撮影比率(R)";
 /* ファイルのアップロード */
