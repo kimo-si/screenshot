@@ -2,18 +2,18 @@ import AppKit
 
 enum EditorStyleDefaults {
     static let paletteColors: [NSColor] = [
-        NSColor(red: 1.0, green: 0.23, blue: 0.19, alpha: 1.0),     // Red
-        NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0),      // Blue
-        NSColor(red: 0.0, green: 0.83, blue: 0.42, alpha: 1.0),     // Green
-        NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0),       // Yellow
-        NSColor(red: 0.843, green: 0.467, blue: 0.341, alpha: 1.0), // #D77757
-        .white,
-        NSColor(white: 0.5, alpha: 1.0),                           // Gray
+        NSColor(srgbRed: 0.95, green: 0.36, blue: 0.53, alpha: 1),  // Pink
+        NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 1),   // Red
+        NSColor(srgbRed: 1.0, green: 0.64, blue: 0.22, alpha: 1),   // Orange
+        NSColor(srgbRed: 1.0, green: 0.84, blue: 0.28, alpha: 1),   // Yellow
+        NSColor(srgbRed: 0.39, green: 0.78, blue: 0.43, alpha: 1),  // Green
+        NSColor(srgbRed: 0.20, green: 0.51, blue: 0.96, alpha: 1),  // Blue
         .black,
+        .white,
     ]
 
     static var primaryColor: NSColor {
-        color(fromHex: Defaults.lastEditorColorHex) ?? paletteColors[0]
+        color(fromHex: Defaults.lastEditorColorHex) ?? paletteColors[1]
     }
 
     static var markerColor: NSColor {

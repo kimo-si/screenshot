@@ -95,6 +95,41 @@ final class ToolbarViewChromeTests: XCTestCase {
         XCTAssertGreaterThan(selectedAlpha, 0.08)
     }
 
+    // 分组间隙不能移动按钮到背景之外，按钮仍分发原来的工具动作
+    func testGroupedToolbarPreservesHitTargetsAndActions() throws {
+        for size in [Defaults.toolbarButtonSizeMin, Defaults.toolbarButtonSizeMax] {
+            Defaults.toolbarButtonSize = size
+            let items: [ToolbarItemID] = [.arrow, .undo, .ocr, .confirm]
+            let toolbar = ToolbarView(items: items, orientation: .horizontal)
+            toolbar.layout()
+            XCTAssertEqual(toolbar.surfaceRects.count, 2)
+            var triggered: [ToolbarItemID] = []
+            toolbar.onItemTriggered = { triggered.append($0) }
+            for item in items {
+                let frame = try XCTUnwrap(toolbar.frame(for: item))
+                XCTAssertTrue(toolbar.surfaceRects.contains { $0.contains(frame) })
+                let hit = try XCTUnwrap(toolbar.hitTest(NSPoint(x: frame.midX, y: frame.midY)) as? ToolButton)
+                hit.performClick(nil)
+            }
+            XCTAssertEqual(triggered, items)
+        }
+    }
+
+    // 每次粗细预设点击只开启和提交一次调整，兼容选中标注的撤销机制
+    func testStrokePresetCommitsOneAdjustment() throws {
+        let control = StrokeSizeControl(
+            frame: NSRect(x: 0, y: 0, width: 118, height: 24),
+            sizes: [2, 4, 6], value: 3, minValue: 1, maxValue: 16)
+        var events: [String] = []
+        control.onEditingBegan = { events.append("begin") }
+        control.onValueChanged = { events.append("value:\(Int($0))") }
+        control.onEditingEnded = { events.append("end") }
+        let mediumButton = try XCTUnwrap(control.subviews.compactMap { $0 as? NSButton }.first { $0.tag == 1 })
+        mediumButton.performClick(nil)
+        XCTAssertEqual(control.value, 4)
+        XCTAssertEqual(events, ["begin", "value:4", "end"])
+    }
+
     private func sampleFillAlpha(in button: ToolButton) throws -> CGFloat {
         let width = Int(button.bounds.width)
         let height = Int(button.bounds.height)

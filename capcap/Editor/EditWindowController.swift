@@ -849,8 +849,7 @@ class EditWindowController {
             showColorSizeSubToolbar(
                 sizes: [],
                 dynamicColor: pickedColorSwatch,
-                currentSize: 0,
-                width: pickedColorSwatch == nil ? 200 : 225
+                currentSize: 0
             )
         case .mosaic:
             showMosaicSubToolbar()
@@ -2863,8 +2862,7 @@ class EditWindowController {
     }
 
     private func styleFloatingHUD(_ view: NSView) {
-        // Frosted HUD bars own their glass + shadow; layer-backing the
-        // host would isolate compositing and flatten the blur.
+        // 编辑工具栏自行绘制分组底板，不叠加通用浮窗阴影。
         if view is FrostedHUDView { return }
         view.wantsLayer = true
         view.layer?.shadowColor = NSColor.black.cgColor
@@ -2961,8 +2959,9 @@ class ToolbarView: FrostedHUDView {
     static var endPadding: CGFloat { scaledToolbarMetric(10, minimum: 8) }
     /// Inset on the cross axis — keeps a compact capsule around the buttons.
     static var crossPadding: CGFloat { scaledToolbarMetric(4, minimum: 3) }
-    static var symbolPointSize: CGFloat { scaledToolbarMetric(12, minimum: 10) }
+    static var symbolPointSize: CGFloat { scaledToolbarMetric(14, minimum: 12) }
 
+    // 按用户设置的按钮尺寸缩放间距和图标
     private static func scaledToolbarMetric(_ reference: CGFloat, minimum: CGFloat) -> CGFloat {
         max(minimum, (buttonSize * reference / CGFloat(Defaults.toolbarButtonSizeDefault)).rounded())
     }
@@ -2970,12 +2969,36 @@ class ToolbarView: FrostedHUDView {
     let orientation: Orientation
     private let items: [ToolbarItemID]
 
+    /// 横向工具栏在第一组操作工具之前断开底板，保持用户的按钮顺序
+    private var groupBreakIndex: Int? {
+        guard orientation == .horizontal,
+              let index = items.firstIndex(where: { !$0.belongsToDrawingGroup }),
+              index > 0 else { return nil }
+        return index
+    }
+
+    private var groupExtraSpacing: CGFloat {
+        groupBreakIndex == nil ? 0 : Self.endPadding * 2 + FrostedHUDChrome.groupGap - Self.buttonSpacing
+    }
+
+    /// 两组底板共享同一个工具栏坐标系，拖动和布局仍按整体计算
+    override var surfaceRects: [NSRect] {
+        guard let index = groupBreakIndex else { return [bounds] }
+        let firstWidth = Self.endPadding * 2 + CGFloat(index) * Self.buttonSize
+            + CGFloat(index - 1) * Self.buttonSpacing
+        let secondX = firstWidth + FrostedHUDChrome.groupGap
+        return [
+            NSRect(x: 0, y: 0, width: firstWidth, height: bounds.height),
+            NSRect(x: secondX, y: 0, width: bounds.width - secondX, height: bounds.height)
+        ]
+    }
+
     /// Size that fits the current items in the current orientation.
     var preferredSize: NSSize {
         let n = items.count
         let run = CGFloat(n) * Self.buttonSize
             + CGFloat(max(0, n - 1)) * Self.buttonSpacing
-            + Self.endPadding * 2
+            + Self.endPadding * 2 + groupExtraSpacing
         let thickness = Self.buttonSize + Self.crossPadding * 2
         switch orientation {
         case .horizontal: return NSSize(width: max(run, thickness), height: thickness)
@@ -3046,11 +3069,13 @@ class ToolbarView: FrostedHUDView {
     }
     var scrollCaptureButtonFrame: NSRect? { frame(for: .scrollCapture) }
 
+    // 创建按钮并在标注与操作分组之间预留透明间隙
     private func setupButtons() {
         let size = Self.buttonSize
         let step = size + Self.buttonSpacing
         for (index, id) in items.enumerated() {
-            let along = Self.endPadding + CGFloat(index) * step
+            let groupOffset = groupBreakIndex.map { index >= $0 ? groupExtraSpacing : 0 } ?? 0
+            let along = Self.endPadding + CGFloat(index) * step + groupOffset
             let frame: NSRect
             switch orientation {
             case .horizontal:
@@ -3066,6 +3091,7 @@ class ToolbarView: FrostedHUDView {
         }
     }
 
+    // 复用原有回调，为确认操作应用圆形强调底板
     private func makeButton(for id: ToolbarItemID, index: Int, frame: NSRect) -> NSView {
         // The move-selection handle is a press-drag gesture, not a tap target.
         if id.kind == .dragHandle {
@@ -3081,9 +3107,11 @@ class ToolbarView: FrostedHUDView {
             frame: frame,
             symbolName: id.symbolName,
             normalColor: id.normalColor,
-            selectedColor: id.selectedColor
+            selectedColor: id.selectedColor,
+            style: id == .confirm ? .confirmation : .editor
         )
         btn.hoverTip = id.tooltip
+        btn.setAccessibilityLabel(id.localizedTitle)
         btn.target = self
         btn.action = #selector(buttonTapped(_:))
         btn.tag = index
@@ -3107,6 +3135,8 @@ class ToolbarView: FrostedHUDView {
 // MARK: - Tool Button
 
 class ToolButton: NSButton {
+    enum Style { case standard, editor, confirmation }
+
     var isSelected = false {
         didSet { needsDisplay = true }
     }
@@ -3124,9 +3154,13 @@ class ToolButton: NSButton {
 
     private let normalColor: NSColor
     private let selectedColor: NSColor
+    private let style: Style
     private var hoverTrackingArea: NSTrackingArea?
 
-    init(frame: NSRect, symbolName: String, normalColor: NSColor, selectedColor: NSColor) {
+    // 创建模板图标按钮，样式仅影响外观，不改变原有动作与状态
+    init(frame: NSRect, symbolName: String, normalColor: NSColor, selectedColor: NSColor,
+         style: Style = .standard) {
+        self.style = style
         self.normalColor = normalColor
         self.selectedColor = selectedColor
         super.init(frame: frame)
@@ -3193,23 +3227,27 @@ class ToolButton: NSButton {
         }
     }
 
+    // 分别绘制选中块、悬停反馈和始终可见的圆形确认按钮
     override func draw(_ dirtyRect: NSRect) {
-        let showSelectedChrome = isSelected
-        let showHoverChrome = !isSelected && (isHovered || isHighlighted)
-        if showSelectedChrome || showHoverChrome {
-            contentTintColor = showSelectedChrome ? selectedColor : normalColor
-            let bgPath = NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5),
-                xRadius: 6,
-                yRadius: 6
-            )
-            (showSelectedChrome ? AdaptiveChrome.selectedFill : AdaptiveChrome.hoverFill).setFill()
-            bgPath.fill()
-        } else {
-            contentTintColor = normalColor
+        let emphasized = isSelected || style == .confirmation
+        contentTintColor = emphasized ? selectedColor : normalColor
+        if emphasized || (isEnabled && (isHovered || isHighlighted)) {
+            drawBackground(emphasized: emphasized)
         }
         super.draw(dirtyRect)
     }
+
+    // 粉色仅用于编辑器选中态，其余复用按钮保留各自面板的交互样式
+    private func drawBackground(emphasized: Bool) {
+        let rect = bounds.insetBy(dx: 1, dy: 1)
+        let radius = style == .confirmation ? rect.height / 2 : rect.height * 0.32
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        let selectedFill = style == .standard ? AdaptiveChrome.selectedFill : FrostedHUDChrome.accentColor
+        let hoverFill = style == .standard ? AdaptiveChrome.hoverFill : FrostedHUDChrome.hoverFill
+        (emphasized ? selectedFill : hoverFill).setFill()
+        path.fill()
+    }
+
 }
 
 // MARK: - Move-selection Drag Handle
@@ -3897,7 +3935,7 @@ private final class EmojiChoiceView: NSView {
             (isSelected ? AdaptiveChrome.selectedFill : AdaptiveChrome.subtleFill).setFill()
             bg.fill()
             if isSelected {
-                accentGreen.setStroke()
+                FrostedHUDChrome.accentColor.setStroke()
                 bg.lineWidth = 1.4
                 bg.stroke()
             }
@@ -3984,13 +4022,13 @@ private final class MoreOptionsButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let emphasized = isHovering || isHighlighted || isActive
-        contentTintColor = isActive ? accentGreen : (emphasized ? .labelColor : .secondaryLabelColor)
+        contentTintColor = isActive ? FrostedHUDChrome.accentColor : (emphasized ? .labelColor : .secondaryLabelColor)
         if emphasized {
             let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 7, yRadius: 7)
             (isActive ? AdaptiveChrome.selectedFill : AdaptiveChrome.subtleFill).setFill()
             bg.fill()
             if isActive {
-                accentGreen.setStroke()
+                FrostedHUDChrome.accentColor.setStroke()
                 bg.lineWidth = 1.2
                 bg.stroke()
             }
@@ -4004,6 +4042,166 @@ private final class MoreOptionsButton: NSButton {
 private enum ShapeStrokePreviewShape {
     case rectangle
     case ellipse
+}
+
+/// 三档圆点预设与精确粗细入口，共用同一组编辑事务回调
+final class StrokeSizeControl: NSView {
+    var onEditingBegan: (() -> Void)?
+    var onValueChanged: ((CGFloat) -> Void)?
+    var onEditingEnded: (() -> Void)?
+    private(set) var value: CGFloat
+    private let minValue: CGFloat
+    private let maxValue: CGFloat
+    private let sizes: [CGFloat]
+    private var presetButtons: [StrokeSizeButton] = []
+    private let valueButton = NSButton()
+    private var popover: NSPopover?
+    private static let presetStep: CGFloat = 28
+    private static let valueWidth: CGFloat = 34
+    private static let popoverSize = NSSize(width: 172, height: 44)
+
+    // 让颜色栏按实际预设数量预留空间
+    static func preferredWidth(presetCount: Int) -> CGFloat {
+        CGFloat(presetCount) * presetStep + valueWidth
+    }
+
+    // 初始化离散粗细与精确调节共用的数值范围
+    init(frame: NSRect, sizes: [CGFloat], value: CGFloat, minValue: CGFloat, maxValue: CGFloat) {
+        self.sizes = sizes
+        self.minValue = minValue
+        self.maxValue = max(minValue, maxValue)
+        self.value = min(max(value, minValue), self.maxValue)
+        super.init(frame: frame)
+        setupPresetButtons()
+        setupValueButton()
+        updateSelection()
+    }
+
+    // 控件只通过代码创建
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // 将预设粗细映射为递增的白色圆点
+    private func setupPresetButtons() {
+        for (index, size) in sizes.enumerated() {
+            let button = StrokeSizeButton(
+                frame: NSRect(x: CGFloat(index) * Self.presetStep, y: 0, width: 24, height: 24),
+                diameter: CGFloat(4 + index * 3))
+            button.tag = index
+            button.toolTip = "\(Int(size)) px"
+            button.setAccessibilityLabel(button.toolTip)
+            button.target = self
+            button.action = #selector(presetTapped(_:))
+            presetButtons.append(button)
+            addSubview(button)
+        }
+    }
+
+    // 数值按钮显式保留精确粗细入口，避免将连续设置限制为三档
+    private func setupValueButton() {
+        valueButton.frame = NSRect(x: CGFloat(sizes.count) * Self.presetStep, y: 0,
+                                   width: Self.valueWidth, height: 24)
+        valueButton.isBordered = false
+        valueButton.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        valueButton.contentTintColor = FrostedHUDChrome.iconColor
+        valueButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 7, weight: .medium))
+        valueButton.imagePosition = .imageRight
+        valueButton.target = self
+        valueButton.action = #selector(showPrecisionSlider(_:))
+        addSubview(valueButton)
+    }
+
+    // 一次预设点击按开始、变更、提交顺序生成单条撤销记录
+    @objc private func presetTapped(_ sender: NSButton) {
+        guard sizes.indices.contains(sender.tag) else { return }
+        onEditingBegan?()
+        applyValue(sizes[sender.tag])
+        onEditingEnded?()
+    }
+
+    // 钳制并同步数值与可视选中态，再通知标注模型
+    private func applyValue(_ newValue: CGFloat) {
+        value = min(max(newValue, minValue), maxValue)
+        updateSelection()
+        onValueChanged?(value)
+    }
+
+    // 只有精确匹配的档位显示粉色圆环，自定义数值不冒充某一档
+    private func updateSelection() {
+        for (index, button) in presetButtons.enumerated() {
+            button.isSelected = abs(sizes[index] - value) < 0.01
+        }
+        valueButton.title = String(format: "%.0f", value)
+        valueButton.toolTip = "\(valueButton.title) px"
+    }
+
+    // 在数值入口旁打开原来的连续调节控件
+    @objc private func showPrecisionSlider(_ sender: NSButton) {
+        if let popover, popover.isShown { popover.close(); return }
+        let controller = NSViewController()
+        controller.view = FrostedHUDView(frame: NSRect(origin: .zero, size: Self.popoverSize))
+        controller.view.addSubview(makePrecisionSlider())
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.contentViewController = controller
+        popover.contentSize = Self.popoverSize
+        self.popover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+    }
+
+    // 将滑杆拖动接入同一组撤销事务，保留精确调整行为
+    private func makePrecisionSlider() -> HUDSlider {
+        let slider = HUDSlider(value: Double(value), minValue: Double(minValue), maxValue: Double(maxValue),
+                               target: self, action: #selector(precisionChanged(_:)))
+        slider.frame = NSRect(x: 12, y: 10, width: Self.popoverSize.width - 24, height: HUDSlider.preferredHeight)
+        slider.isContinuous = true
+        slider.onEditingBegan = { [weak self] in self?.onEditingBegan?() }
+        slider.onEditingEnded = { [weak self] in self?.onEditingEnded?() }
+        return slider
+    }
+
+    // 将连续调节结果同步到预设圆点和当前标注
+    @objc private func precisionChanged(_ sender: HUDSlider) {
+        applyValue(CGFloat(sender.doubleValue))
+    }
+
+    // 工具切换或编辑器关闭时同时清理临时浮层
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { popover?.close(); popover = nil }
+    }
+}
+
+/// 原生按钮承载点击与键盘行为，自定义绘制粗细圆点
+private final class StrokeSizeButton: NSButton {
+    var isSelected = false { didSet { needsDisplay = true } }
+    private let diameter: CGFloat
+
+    // 去掉原生边框，只保留居中的粗细预览
+    init(frame: NSRect, diameter: CGFloat) {
+        self.diameter = diameter
+        super.init(frame: frame)
+        isBordered = false
+        title = ""
+        setButtonType(.momentaryPushIn)
+    }
+
+    // 控件只通过代码创建
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // 粗细预览与参考图一致，选中时增加粉色外圈
+    override func draw(_ dirtyRect: NSRect) {
+        let dot = NSRect(x: bounds.midX - diameter / 2, y: bounds.midY - diameter / 2,
+                         width: diameter, height: diameter)
+        FrostedHUDChrome.iconColor.setFill()
+        NSBezierPath(ovalIn: dot).fill()
+        guard isSelected || isHighlighted else { return }
+        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 4, dy: 4))
+        FrostedHUDChrome.accentColor.setStroke()
+        ring.lineWidth = 2
+        ring.stroke()
+    }
 }
 
 private class ColorSizeSubToolbar: FrostedHUDView {
@@ -4020,7 +4218,6 @@ private class ColorSizeSubToolbar: FrostedHUDView {
     var onShapeFillModeChanged: ((ShapeFillMode) -> Void)?
     var onShapeStrokeStyleChanged: ((ShapeStrokeStyle) -> Void)?
 
-    private var sizeSlider: HUDSlider?
     private var colorButtons: [NSView] = []
     private var arrowStyleButtons: [ArrowStyleButtonView] = []
     private var shapeFillModeControl: ShapeFillModeSegmentedControl?
@@ -4040,9 +4237,8 @@ private class ColorSizeSubToolbar: FrostedHUDView {
     }
 
     private static let leadingPad: CGFloat = 12
-    private static let sizeSliderWidth: CGFloat = 136
-    private static let swatchSize: CGFloat = 18
-    private static let swatchGap: CGFloat = 5
+    private static let swatchSize = FrostedHUDChrome.swatchSize
+    private static let swatchGap = FrostedHUDChrome.swatchGap
     private static let separatorGap: CGFloat = 6
     private static let arrowStyleGap: CGFloat = 8
     private static let arrowStyleButtonWidth: CGFloat = 27
@@ -4053,6 +4249,12 @@ private class ColorSizeSubToolbar: FrostedHUDView {
     private static let trailingPad: CGFloat = 12
     private static var baseColorCount: CGFloat { CGFloat(EditorStyleDefaults.paletteColors.count) }
 
+    // 由预设数量计算粗细控件宽度，避免选项栏背景小于实际内容
+    private static func sizeControlWidth(sizes: [CGFloat]) -> CGFloat {
+        StrokeSizeControl.preferredWidth(presetCount: sizes.count)
+    }
+
+    // 根据实际可见选项计算完整工具栏宽度
     static func preferredWidth(
         sizes: [CGFloat],
         dynamicColor: NSColor?,
@@ -4063,7 +4265,7 @@ private class ColorSizeSubToolbar: FrostedHUDView {
     ) -> CGFloat {
         var x = leadingPad
         if !sizes.isEmpty {
-            x += sizeSliderWidth
+            x += sizeControlWidth(sizes: sizes)
             x += 8 + 1 + 9
         }
 
@@ -4134,149 +4336,110 @@ private class ColorSizeSubToolbar: FrostedHUDView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    // 按颜色、粗细、工具专属样式编排选项，尺寸来自同一套度量
     private func setup() {
-        var x: CGFloat = 12
-        let midY = bounds.midY
+        var rightEdge = addColorSwatches()
+        // 粗细控件复用原有事务边界，保持一次调整对应一次撤销
+        if !sizes.isEmpty { rightEdge = addSizeControl(after: rightEdge) }
+        if currentArrowStyle != nil { rightEdge = addArrowStyles(after: rightEdge) }
+        if showsShapeFillModes { rightEdge = addShapeFillModes(after: rightEdge) }
+        if showsShapeStrokeStyles { addShapeStrokeStyles(after: rightEdge) }
+    }
 
-        if !sizes.isEmpty {
-            let slider = HUDSlider(
-                value: Double(currentSize),
-                minValue: Double(sizeMinValue),
-                maxValue: Double(sizeMaxValue),
-                target: self,
-                action: #selector(sizeSliderChanged(_:))
-            )
-            slider.isContinuous = true
-            slider.frame = NSRect(
-                x: x,
-                y: midY - HUDSlider.preferredHeight / 2,
-                width: Self.sizeSliderWidth,
-                height: HUDSlider.preferredHeight
-            )
-            slider.onEditingBegan = { [weak self] in self?.onSizeBegan?() }
-            slider.onEditingEnded = { [weak self] in self?.onSizeEnded?() }
-            addSubview(slider)
-            sizeSlider = slider
-            x += Self.sizeSliderWidth
-        }
-
-        // Separator only when there's a size section to separate from.
-        if !sizes.isEmpty {
-            x += 8
-            let sep = AdaptiveSeparatorView(frame: NSRect(x: x, y: 6, width: 1, height: bounds.height - 12))
-            addSubview(sep)
-            x += 9
-        }
-
-        // Color swatches. The dynamic picked color uses an ink-bottle glyph
-        // rather than another static-looking palette dot.
-        let swatchSize: CGFloat = ColorSizeSubToolbar.swatchSize
-        for (i, color) in colors.enumerated() {
-            let style: ColorSwatchView.Style = (dynamicColor != nil && i == baseColors.count)
-                ? .pickedInkBottle
-                : .paletteDot
+    // 创建颜色行，自定义取色继续使用墨水瓶图标
+    private func addColorSwatches() -> CGFloat {
+        var x = Self.leadingPad
+        for (index, color) in colors.enumerated() {
+            let style: ColorSwatchView.Style = dynamicColor != nil && index == baseColors.count
+                ? .pickedInkBottle : .paletteDot
             let swatch = ColorSwatchView(
-                frame: NSRect(x: x, y: midY - swatchSize/2, width: swatchSize, height: swatchSize),
-                color: color,
-                isSelected: colorsMatch(color, currentColor),
-                style: style
-            )
-            if style == .pickedInkBottle {
-                swatch.hoverTip = L10n.tipPickedInkBottle
-            }
-            swatch.itemIndex = i
-            let click = NSClickGestureRecognizer(target: self, action: #selector(colorTapped(_:)))
-            swatch.addGestureRecognizer(click)
+                frame: NSRect(x: x, y: bounds.midY - Self.swatchSize / 2,
+                              width: Self.swatchSize, height: Self.swatchSize),
+                color: color, isSelected: colorsMatch(color, currentColor), style: style)
+            swatch.hoverTip = style == .pickedInkBottle ? L10n.tipPickedInkBottle : nil
+            swatch.itemIndex = index
+            swatch.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(colorTapped(_:))))
             addSubview(swatch)
             colorButtons.append(swatch)
-            x += swatchSize + ColorSizeSubToolbar.swatchGap
+            x += Self.swatchSize + Self.swatchGap
         }
+        return x - Self.swatchGap
+    }
 
-        var lastSectionRightEdge = x - ColorSizeSubToolbar.swatchGap
+    // 添加竖向分隔线，并返回下一个选项组的起始位置
+    private func addSeparator(after rightEdge: CGFloat) -> CGFloat {
+        let x = rightEdge + Self.separatorGap
+        addSubview(AdaptiveSeparatorView(frame: NSRect(x: x, y: 8, width: 1, height: bounds.height - 16)))
+        return x + 1 + Self.arrowStyleGap
+    }
 
-        if currentArrowStyle != nil {
-            let styleSepX = lastSectionRightEdge + ColorSizeSubToolbar.separatorGap
-            let styleSep = AdaptiveSeparatorView(frame: NSRect(x: styleSepX, y: 6, width: 1, height: bounds.height - 12))
-            addSubview(styleSep)
-
-            x = styleSepX + 1 + ColorSizeSubToolbar.arrowStyleGap
-            for style in ArrowStyle.allCases {
-                let button = ArrowStyleButtonView(
-                    frame: NSRect(
-                        x: x,
-                        y: midY - ColorSizeSubToolbar.arrowStyleButtonHeight / 2,
-                        width: ColorSizeSubToolbar.arrowStyleButtonWidth,
-                        height: ColorSizeSubToolbar.arrowStyleButtonHeight
-                    ),
-                    style: style,
-                    isSelected: currentArrowStyle == style
-                )
-                let click = NSClickGestureRecognizer(target: self, action: #selector(arrowStyleTapped(_:)))
-                button.addGestureRecognizer(click)
-                addSubview(button)
-                arrowStyleButtons.append(button)
-                x += ColorSizeSubToolbar.arrowStyleButtonWidth + ColorSizeSubToolbar.arrowStyleButtonGap
-            }
-            lastSectionRightEdge = x - ColorSizeSubToolbar.arrowStyleButtonGap
+    // 三个圆点提供常用粗细，数值按钮展开连续调节滑杆
+    private func addSizeControl(after rightEdge: CGFloat) -> CGFloat {
+        let x = rightEdge + 8
+        addSubview(AdaptiveSeparatorView(frame: NSRect(x: x, y: 8, width: 1, height: bounds.height - 16)))
+        let control = StrokeSizeControl(
+            frame: NSRect(x: x + 10, y: bounds.midY - 12, width: Self.sizeControlWidth(sizes: sizes), height: 24),
+            sizes: sizes, value: currentSize, minValue: sizeMinValue, maxValue: sizeMaxValue)
+        // 预设点击和滑杆拖动共用标注编辑事务
+        control.onEditingBegan = { [weak self] in self?.onSizeBegan?() }
+        control.onValueChanged = { [weak self] value in
+            self?.currentSize = value
+            self?.onSizeChanged?(value)
         }
+        control.onEditingEnded = { [weak self] in self?.onSizeEnded?() }
+        addSubview(control)
+        return control.frame.maxX
+    }
 
-        if showsShapeFillModes {
-            let fillSepX = lastSectionRightEdge + ColorSizeSubToolbar.separatorGap
-            let fillSep = AdaptiveSeparatorView(frame: NSRect(x: fillSepX, y: 6, width: 1, height: bounds.height - 12))
-            addSubview(fillSep)
-
-            x = fillSepX + 1 + ColorSizeSubToolbar.arrowStyleGap
-            let controlWidth = ShapeFillModeSegmentedControl.preferredWidth()
-            let control = ShapeFillModeSegmentedControl(
-                frame: NSRect(
-                    x: x,
-                    y: midY - ShapeFillModeSegmentedControl.preferredHeight / 2,
-                    width: controlWidth,
-                    height: ShapeFillModeSegmentedControl.preferredHeight
-                ),
-                selectedMode: currentShapeFillMode ?? .none
-            )
-            control.onSelect = { [weak self] mode in
-                self?.currentShapeFillMode = mode
-                self?.onShapeFillModeChanged?(mode)
-            }
-            addSubview(control)
-            shapeFillModeControl = control
-            lastSectionRightEdge = control.frame.maxX
+    // 创建箭头样式选项，保持已有样式选择逻辑
+    private func addArrowStyles(after rightEdge: CGFloat) -> CGFloat {
+        var x = addSeparator(after: rightEdge)
+        for style in ArrowStyle.allCases {
+            let button = ArrowStyleButtonView(
+                frame: NSRect(x: x, y: bounds.midY - Self.arrowStyleButtonHeight / 2,
+                              width: Self.arrowStyleButtonWidth, height: Self.arrowStyleButtonHeight),
+                style: style, isSelected: currentArrowStyle == style)
+            button.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(arrowStyleTapped(_:))))
+            addSubview(button)
+            arrowStyleButtons.append(button)
+            x += Self.arrowStyleButtonWidth + Self.arrowStyleButtonGap
         }
+        return x - Self.arrowStyleButtonGap
+    }
 
-        if showsShapeStrokeStyles {
-            let styleSepX = lastSectionRightEdge + ColorSizeSubToolbar.separatorGap
-            let styleSep = AdaptiveSeparatorView(frame: NSRect(x: styleSepX, y: 6, width: 1, height: bounds.height - 12))
-            addSubview(styleSep)
+    // 创建形状填充选项，并将切换结果传回编辑会话
+    private func addShapeFillModes(after rightEdge: CGFloat) -> CGFloat {
+        let x = addSeparator(after: rightEdge)
+        let control = ShapeFillModeSegmentedControl(
+            frame: NSRect(x: x, y: bounds.midY - ShapeFillModeSegmentedControl.preferredHeight / 2,
+                          width: ShapeFillModeSegmentedControl.preferredWidth(),
+                          height: ShapeFillModeSegmentedControl.preferredHeight),
+            selectedMode: currentShapeFillMode ?? .none)
+        control.onSelect = { [weak self] mode in
+            self?.currentShapeFillMode = mode
+            self?.onShapeFillModeChanged?(mode)
+        }
+        addSubview(control)
+        shapeFillModeControl = control
+        return control.frame.maxX
+    }
 
-            x = styleSepX + 1 + ColorSizeSubToolbar.arrowStyleGap
-            for style in Self.shapeStrokeStyles(for: shapeStrokePreviewShape) {
-                let button = ShapeStrokeStyleButtonView(
-                    frame: NSRect(
-                        x: x,
-                        y: midY - ColorSizeSubToolbar.shapeButtonHeight / 2,
-                        width: ColorSizeSubToolbar.shapeButtonWidth,
-                        height: ColorSizeSubToolbar.shapeButtonHeight
-                    ),
-                    style: style,
-                    previewShape: shapeStrokePreviewShape,
-                    isSelected: currentShapeStrokeStyle == style
-                )
-                let click = NSClickGestureRecognizer(target: self, action: #selector(shapeStrokeStyleTapped(_:)))
-                button.addGestureRecognizer(click)
-                addSubview(button)
-                shapeStrokeStyleButtons.append(button)
-                x += ColorSizeSubToolbar.shapeButtonWidth + ColorSizeSubToolbar.arrowStyleButtonGap
-            }
+    // 为矩形或椭圆提供对应的轮廓样式
+    private func addShapeStrokeStyles(after rightEdge: CGFloat) {
+        var x = addSeparator(after: rightEdge)
+        for style in Self.shapeStrokeStyles(for: shapeStrokePreviewShape) {
+            let button = ShapeStrokeStyleButtonView(
+                frame: NSRect(x: x, y: bounds.midY - Self.shapeButtonHeight / 2,
+                              width: Self.shapeButtonWidth, height: Self.shapeButtonHeight),
+                style: style, previewShape: shapeStrokePreviewShape, isSelected: currentShapeStrokeStyle == style)
+            button.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(shapeStrokeStyleTapped(_:))))
+            addSubview(button)
+            shapeStrokeStyleButtons.append(button)
+            x += Self.shapeButtonWidth + Self.arrowStyleButtonGap
         }
     }
 
-    @objc private func sizeSliderChanged(_ sender: HUDSlider) {
-        currentSize = min(max(CGFloat(sender.doubleValue), sizeMinValue), sizeMaxValue)
-        onSizeChanged?(currentSize)
-    }
-
+    // 将色点选择同步到当前工具和已选中的标注
     @objc private func colorTapped(_ gesture: NSGestureRecognizer) {
         guard let view = gesture.view as? ColorSwatchView else { return }
         let index = view.itemIndex
@@ -4434,8 +4597,8 @@ private class TextSubToolbar: FrostedHUDView {
     // view is always wide enough for everything it lays out.
     private static let leadingPad: CGFloat = 12
     private static let sliderWidth: CGFloat = 150
-    private static let swatchSize: CGFloat = 18
-    private static let swatchGap: CGFloat = 5
+    private static let swatchSize = FrostedHUDChrome.swatchSize
+    private static let swatchGap = FrostedHUDChrome.swatchGap
     private static let separatorGap: CGFloat = 6
     private static let checkboxGap: CGFloat = 8
     private static let trailingPad: CGFloat = 12
@@ -4492,99 +4655,74 @@ private class TextSubToolbar: FrostedHUDView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    // 与画笔选项保持颜色在前、数值与效果在后的统一顺序
     private func setup() {
-        var x: CGFloat = 12
-        let midY = bounds.midY
+        let paletteEnd = addColorSwatches()
+        // 字号调整沿用编辑会话的开始和提交回调
+        let sliderEnd = addFontSizeSlider(after: paletteEnd)
+        addTextEffects(after: sliderEnd)
+    }
 
-        // Font-size slider.
-        let s = HUDSlider(
-            value: Double(currentFontSize),
-            minValue: Defaults.textFontSizeMin,
-            maxValue: Defaults.textFontSizeMax,
-            target: self,
-            action: #selector(sliderChanged(_:))
-        )
-        s.isContinuous = true
-        s.frame = NSRect(
-            x: x,
-            y: midY - HUDSlider.preferredHeight / 2,
-            width: TextSubToolbar.sliderWidth,
-            height: HUDSlider.preferredHeight
-        )
-        s.onEditingBegan = { [weak self] in self?.onFontSizeBegan?() }
-        s.onEditingEnded = { [weak self] in self?.onFontSizeEnded?() }
-        addSubview(s)
-        slider = s
-        x += TextSubToolbar.sliderWidth + 8
-
-        // Vertical separator between size controls and color swatches.
-        let sep = AdaptiveSeparatorView(frame: NSRect(x: x, y: 6, width: 1, height: bounds.height - 12))
-        addSubview(sep)
-        x += 1 + 9
-
-        // Color swatches. The dynamic picked color uses an ink-bottle glyph
-        // rather than another static-looking palette dot.
-        let swatchSize: CGFloat = TextSubToolbar.swatchSize
-        for (i, color) in colors.enumerated() {
-            let style: ColorSwatchView.Style = (dynamicColor != nil && i == baseColors.count)
-                ? .pickedInkBottle
-                : .paletteDot
+    // 复用共享色点外观，自定义取色仍保留独立标识
+    private func addColorSwatches() -> CGFloat {
+        var x = Self.leadingPad
+        for (index, color) in colors.enumerated() {
+            let style: ColorSwatchView.Style = dynamicColor != nil && index == baseColors.count
+                ? .pickedInkBottle : .paletteDot
             let swatch = ColorSwatchView(
-                frame: NSRect(x: x, y: midY - swatchSize / 2, width: swatchSize, height: swatchSize),
-                color: color,
-                isSelected: colorsMatch(color, currentColor),
-                style: style
-            )
-            if style == .pickedInkBottle {
-                swatch.hoverTip = L10n.tipPickedInkBottle
-            }
-            swatch.itemIndex = i
-            let click = NSClickGestureRecognizer(target: self, action: #selector(colorTapped(_:)))
-            swatch.addGestureRecognizer(click)
+                frame: NSRect(x: x, y: bounds.midY - Self.swatchSize / 2,
+                              width: Self.swatchSize, height: Self.swatchSize),
+                color: color, isSelected: colorsMatch(color, currentColor), style: style)
+            swatch.hoverTip = style == .pickedInkBottle ? L10n.tipPickedInkBottle : nil
+            swatch.itemIndex = index
+            swatch.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(colorTapped(_:))))
             addSubview(swatch)
             colorButtons.append(swatch)
-            x += swatchSize + TextSubToolbar.swatchGap
+            x += Self.swatchSize + Self.swatchGap
         }
+        return x - Self.swatchGap
+    }
 
-        // Vertical separator between color swatches and the outline checkbox.
-        let lastSwatchRightEdge = x - TextSubToolbar.swatchGap
-        let strokeSepX = lastSwatchRightEdge + TextSubToolbar.separatorGap
-        let strokeSep = AdaptiveSeparatorView(frame: NSRect(x: strokeSepX, y: 6, width: 1, height: bounds.height - 12))
-        addSubview(strokeSep)
+    // 颜色之后放置字号滑杆，并返回效果选项的布局锚点
+    private func addFontSizeSlider(after rightEdge: CGFloat) -> CGFloat {
+        let separator = AdaptiveSeparatorView(
+            frame: NSRect(x: rightEdge + 8, y: 8, width: 1, height: bounds.height - 16))
+        addSubview(separator)
+        let slider = HUDSlider(value: Double(currentFontSize), minValue: Defaults.textFontSizeMin,
+                               maxValue: Defaults.textFontSizeMax, target: self,
+                               action: #selector(sliderChanged(_:)))
+        slider.frame = NSRect(x: rightEdge + 18, y: bounds.midY - HUDSlider.preferredHeight / 2,
+                              width: Self.sliderWidth, height: HUDSlider.preferredHeight)
+        slider.isContinuous = true
+        // 拖动期间实时更新标注，结束时只提交一条撤销记录
+        slider.onEditingBegan = { [weak self] in self?.onFontSizeBegan?() }
+        slider.onEditingEnded = { [weak self] in self?.onFontSizeEnded?() }
+        addSubview(slider)
+        self.slider = slider
+        return slider.frame.maxX
+    }
 
-        // Outline checkbox.
-        let checkboxHeight: CGFloat = 20
+    // 将描边与标注气泡放在最后，保持原有独立开关状态
+    private func addTextEffects(after rightEdge: CGFloat) {
+        let separatorX = rightEdge + Self.separatorGap
+        addSubview(AdaptiveSeparatorView(frame: NSRect(x: separatorX, y: 8, width: 1, height: bounds.height - 16)))
+        strokeCheckbox = addEffectCheckbox(
+            x: separatorX + 1 + Self.checkboxGap, width: Self.strokeCheckboxWidth,
+            title: L10n.textStrokeEffect, enabled: strokeEnabled, action: #selector(strokeCheckboxChanged(_:)))
+        calloutCheckbox = addEffectCheckbox(
+            x: strokeCheckbox.frame.maxX + Self.checkboxGap, width: Self.calloutCheckboxWidth,
+            title: L10n.textCalloutEffect, enabled: calloutEnabled, action: #selector(calloutCheckboxChanged(_:)))
+    }
+
+    // 创建统一高度的文字效果开关
+    private func addEffectCheckbox(x: CGFloat, width: CGFloat, title: String,
+                                   enabled: Bool, action: Selector) -> HUDCheckboxButton {
         let checkbox = HUDCheckboxButton(
-            frame: NSRect(
-                x: strokeSepX + 1 + TextSubToolbar.checkboxGap,
-                y: midY - checkboxHeight / 2,
-                width: TextSubToolbar.strokeCheckboxWidth,
-                height: checkboxHeight
-            ),
-            title: L10n.textStrokeEffect,
-            target: self,
-            action: #selector(strokeCheckboxChanged(_:))
-        )
-        checkbox.state = strokeEnabled ? .on : .off
+            frame: NSRect(x: x, y: bounds.midY - 10, width: width, height: 20),
+            title: title, target: self, action: action)
+        checkbox.state = enabled ? .on : .off
         addSubview(checkbox)
-        strokeCheckbox = checkbox
-
-        let calloutX = checkbox.frame.maxX + TextSubToolbar.checkboxGap
-        let calloutCheckbox = HUDCheckboxButton(
-            frame: NSRect(
-                x: calloutX,
-                y: midY - checkboxHeight / 2,
-                width: TextSubToolbar.calloutCheckboxWidth,
-                height: checkboxHeight
-            ),
-            title: L10n.textCalloutEffect,
-            target: self,
-            action: #selector(calloutCheckboxChanged(_:))
-        )
-        calloutCheckbox.state = calloutEnabled ? .on : .off
-        addSubview(calloutCheckbox)
-        self.calloutCheckbox = calloutCheckbox
-
+        return checkbox
     }
 
     @objc private func strokeCheckboxChanged(_ sender: HUDCheckboxButton) {
@@ -4675,7 +4813,7 @@ private final class ArrowStyleButtonView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let color = isSelected ? accentGreen : NSColor.secondaryLabelColor
+        let color = isSelected ? FrostedHUDChrome.accentColor : NSColor.secondaryLabelColor
         color.setFill()
         color.setStroke()
 
@@ -4845,40 +4983,26 @@ private class ColorSwatchView: NSView {
         if window == nil { ToolTipWindow.hide() }
     }
 
+    // 保持色点大小一致，用留有间隙的粉色外圈标识当前颜色
     override func draw(_ dirtyRect: NSRect) {
         if style == .pickedInkBottle {
             drawInkBottle()
             return
         }
-
-        // Draw color circle
-        let inset: CGFloat = isSelected ? 1 : 2
-        let path = NSBezierPath(ovalIn: bounds.insetBy(dx: inset, dy: inset))
+        let dot = NSBezierPath(ovalIn: bounds.insetBy(dx: 4, dy: 4))
         color.setFill()
-        path.fill()
-
-        if isSelected {
-            // Draw green selection ring
-            let ring = NSBezierPath(ovalIn: bounds)
-            accentGreen.setStroke()
-            ring.lineWidth = 2
-            ring.stroke()
-        } else if isHovering {
-            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-            NSColor.white.withAlphaComponent(0.55).setStroke()
-            ring.lineWidth = 1.5
-            ring.stroke()
-        }
-
-        // Draw border for white/light colors
-        if color == .white || color == NSColor(white: 0.5, alpha: 1.0) {
-            let border = NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 2))
-            NSColor.gray.withAlphaComponent(0.3).setStroke()
-            border.lineWidth = 0.5
-            border.stroke()
-        }
+        dot.fill()
+        NSColor.white.withAlphaComponent(0.18).setStroke()
+        dot.lineWidth = 0.5
+        dot.stroke()
+        guard isSelected || isHovering else { return }
+        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
+        (isSelected ? FrostedHUDChrome.accentColor : NSColor.white.withAlphaComponent(0.45)).setStroke()
+        ring.lineWidth = isSelected ? 2 : 1
+        ring.stroke()
     }
 
+    // 绘制取色器保存的自定义颜色
     private func drawInkBottle() {
         let unit = min(bounds.width, bounds.height) / 18.0
         let origin = NSPoint(
@@ -4897,7 +5021,7 @@ private class ColorSwatchView: NSView {
 
         if isSelected {
             let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.75, dy: 0.75))
-            accentGreen.setStroke()
+            FrostedHUDChrome.accentColor.setStroke()
             ring.lineWidth = 2
             ring.stroke()
         }
@@ -5051,7 +5175,7 @@ final class HUDSlider: NSControl {
                 leftHeight: trackLeftHeight,
                 rightHeight: fillRightHeight
             )
-            accentGreen.withAlphaComponent(0.18 * enabledAlpha).setFill()
+            FrostedHUDChrome.accentColor.withAlphaComponent(0.18 * enabledAlpha).setFill()
             fillPath.fill()
         }
 
@@ -5312,7 +5436,7 @@ private final class ShapeFillModeSegmentedControl: NSView {
             let segmentRect = NSRect(x: x, y: rect.minY, width: width, height: rect.height)
             if mode == selectedMode {
                 let selected = NSBezierPath(roundedRect: segmentRect.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
-                accentGreen.setFill()
+                FrostedHUDChrome.accentColor.setFill()
                 selected.fill()
             } else if index > 0 {
                 AdaptiveChrome.separator.setStroke()
@@ -5434,12 +5558,12 @@ private final class ShapeStrokeStyleButtonView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let color = isSelected ? accentGreen : NSColor.secondaryLabelColor
+        let color = isSelected ? FrostedHUDChrome.accentColor : NSColor.secondaryLabelColor
 
         if isSelected || isHovering {
             let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 7, yRadius: 7)
             if isSelected {
-                accentGreen.withAlphaComponent(0.12).setFill()
+                FrostedHUDChrome.accentColor.withAlphaComponent(0.12).setFill()
             } else {
                 AdaptiveChrome.hoverFill.setFill()
             }
@@ -5579,7 +5703,7 @@ private final class HUDCheckboxButton: NSButton {
         let boxPath = NSBezierPath(roundedRect: boxRect, xRadius: 4, yRadius: 4)
 
         if state == .on {
-            accentGreen.withAlphaComponent(enabledAlpha).setFill()
+            FrostedHUDChrome.accentColor.withAlphaComponent(enabledAlpha).setFill()
         } else {
             AdaptiveChrome.subtleFill
                 .withAlphaComponent((isHighlighted ? 1.0 : 0.72) * enabledAlpha)
@@ -6048,7 +6172,7 @@ private class BeautifySwatchView: NSView {
 
         if isSelected {
             let ring = NSBezierPath(ovalIn: bounds)
-            accentGreen.setStroke()
+            FrostedHUDChrome.accentColor.setStroke()
             ring.lineWidth = 2
             ring.stroke()
         } else if isHovering {

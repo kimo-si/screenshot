@@ -91,14 +91,14 @@ extension ToolbarItemID {
         case .ellipse:       return "circle"
         case .arrow:         return "arrow.up.right"
         case .line:          return "line.diagonal"
-        case .pen:           return "pencil.tip"
+        case .pen:           return "scribble"
         case .marker:        return "highlighter"
         case .spotlight:     return "rectangle.inset.filled"
         case .mosaic:        return "square.grid.3x3"
         case .eraser:        return "eraser"
         case .magnifier:     return "plus.magnifyingglass"
         case .numbered:      return "1.circle"
-        case .text:          return "textformat"
+        case .text:          return "t.square"
         case .qrCode:        return "qrcode.viewfinder"
         case .emoji:         return "face.smiling"
         case .insertImage:   return "photo"
@@ -164,32 +164,20 @@ extension ToolbarItemID {
         return EditorShortcutRegistry.displayString(for: .toolbar(self))
     }
 
-    // 按参考图区分普通工具、表情和输出操作的颜色
-    var normalColor: NSColor {
-        switch self {
-        case .close:   return toolbarDangerRed
-        case .save:    return FrostedHUDChrome.saveColor
-        case .confirm: return FrostedHUDChrome.confirmColor
-        case .emoji:   return FrostedHUDChrome.emojiColor
-        default:       return FrostedHUDChrome.iconColor
-        }
-    }
+    // 普通按钮使用统一浅灰色，确认按钮的粉色由按钮底板承载
+    var normalColor: NSColor { FrostedHUDChrome.iconColor }
 
-    /// Icon tint while selected/active. For `momentary` items this equals
-    /// `normalColor` — they never enter a selected state.
-    var selectedColor: NSColor {
-        switch kind {
-        case .toggleTool, .toggleAction:
-            return FrostedHUDChrome.confirmColor
-        case .momentary, .dragHandle:
-            return normalColor
-        }
+    // 选中工具在粉色底板上使用白色图标
+    var selectedColor: NSColor { FrostedHUDChrome.selectedIconColor }
+
+    /// 标注与编辑操作归入左侧分组，其余操作归入右侧分组
+    var belongsToDrawingGroup: Bool {
+        kind == .toggleTool || [.insertImage, .colorPicker, .undo, .redo, .moveSelection].contains(self)
     }
 }
 
-/// Red used for the cancel button's icon. Mirrors the literal previously
-/// inlined in `ToolbarView.setupButtons()`.
-let toolbarDangerRed = FrostedHUDChrome.cancelColor
+/// 取消操作在其他面板中的危险色，独立于编辑工具栏配色
+let toolbarDangerRed = NSColor.systemRed
 
 /// User-customizable assignment of every toolbar item to the primary
 /// (horizontal) toolbar, the side (vertical) toolbar, or hidden.
